@@ -3,7 +3,9 @@ package main
 import (
 	"log"
 
+	sqldbActivities "github.com/SomtoJF/iris-worker/activity/sqldb"
 	"github.com/SomtoJF/iris-worker/initializers/sqldb"
+	"github.com/SomtoJF/iris-worker/workflow/jobapplication"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 )
@@ -43,9 +45,10 @@ func main() {
 }
 
 func registerJobApplicationWorkflows(w worker.Worker) {
-	// w.RegisterWorkflow(JobApplicationWorkflow)
+	w.RegisterWorkflow(jobapplication.JobApplicationWorkflow)
 }
 
 func registerJobApplicationActivities(w worker.Worker) {
-	// w.RegisterActivity(JobApplicationActivity)
+	sqldbActivities := sqldbActivities.NewActivities(sqldb.DB)
+	w.RegisterActivity(sqldbActivities)
 }
