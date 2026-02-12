@@ -125,16 +125,25 @@ type modelRates struct {
 
 func getModelRates(model string) modelRates {
 	rates := map[string]modelRates{
-		"openai/chatgpt-4o-latest":                {inputRate: 5.0, outputRate: 15.0},
-		"openai/gpt-4o-mini":                      {inputRate: 0.15, outputRate: 0.60},
-		"deepseek/deepseek-chat":                  {inputRate: 0.14, outputRate: 0.28},
-		"deepseek/deepseek-r1":                    {inputRate: 0.55, outputRate: 2.19},
-		"deepseek/deepseek-r1-distill-llama-70b":  {inputRate: 0.55, outputRate: 2.19},
-		"google/gemini-2.0-flash-exp:free":        {inputRate: 0, outputRate: 0},
-		"google/gemini-pro-1.5-exp":               {inputRate: 0, outputRate: 0},
-		"google/gemini-flash-1.5-8b":              {inputRate: 0.0375, outputRate: 0.15},
-		"microsoft/phi-3-mini-128k-instruct:free": {inputRate: 0, outputRate: 0},
-		"liquid/lfm-7b":                           {inputRate: 0.10, outputRate: 0.10},
+		"openai/chatgpt-4o-latest":                     {inputRate: 5.0, outputRate: 15.0},
+		"openai/gpt-4o-mini":                           {inputRate: 0.15, outputRate: 0.60},
+		"openai/gpt-5-nano":                            {inputRate: 0.05, outputRate: 0.40},
+		"openai/gpt-5-mini":                            {inputRate: 0.25, outputRate: 2.00},
+		"deepseek/deepseek-chat":                       {inputRate: 0.14, outputRate: 0.28},
+		"deepseek/deepseek-r1":                         {inputRate: 0.55, outputRate: 2.19},
+		"deepseek/deepseek-r1-distill-llama-70b":       {inputRate: 0.55, outputRate: 2.19},
+		"google/gemini-2.0-flash-lite":                 {inputRate: 0.075, outputRate: 0.30},
+		"google/gemini-2.5-flash-lite-preview-09-2025": {inputRate: 0.10, outputRate: 0.40},
+		"google/gemini-2.5-flash-lite":                 {inputRate: 0.10, outputRate: 0.40},
+		"google/gemini-2.0-flash":                      {inputRate: 0.10, outputRate: 0.40},
+		"google/gemini-2.5-flash":                      {inputRate: 0.30, outputRate: 2.50},
+		"google/gemini-3-flash-preview":                {inputRate: 0.50, outputRate: 3.0},
+		"google/gemini-3-pro-preview":                  {inputRate: 2.0, outputRate: 12.0},
+		"google/gemini-2.5-pro":                        {inputRate: 1.25, outputRate: 10.0},
+		"google/gemini-pro-1.5-exp":                    {inputRate: 0, outputRate: 0},
+		"google/gemini-flash-1.5-8b":                   {inputRate: 0.0375, outputRate: 0.15},
+		"microsoft/phi-3-mini-128k-instruct:free":      {inputRate: 0, outputRate: 0},
+		"liquid/lfm-7b":                                {inputRate: 0.10, outputRate: 0.10},
 	}
 
 	if rate, ok := rates[model]; ok {
