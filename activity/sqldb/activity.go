@@ -45,14 +45,6 @@ func (JobApplication) TableName() string {
 	return "job_application"
 }
 
-// BeforeCreate hook to auto-generate UUID
-func (j *JobApplication) BeforeCreate(tx *gorm.DB) error {
-	if j.IdExternal == uuid.Nil {
-		j.IdExternal = uuid.New()
-	}
-	return nil
-}
-
 func (a *Activity) UpdateJobApplication(ctx context.Context, input UpdateJobApplicationInput) error {
 	if err := a.db.Model(&JobApplication{}).Where("id_job_application = ?", input.IdJobApplication).Updates(input.Data).Error; err != nil {
 		return err

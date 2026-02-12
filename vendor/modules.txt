@@ -13,6 +13,8 @@ github.com/gogo/protobuf/types
 # github.com/golang/mock v1.6.0
 ## explicit; go 1.11
 github.com/golang/mock/gomock
+# github.com/google/go-cmp v0.7.0
+## explicit; go 1.21
 # github.com/google/uuid v1.6.0
 ## explicit
 github.com/google/uuid
@@ -41,6 +43,10 @@ github.com/nexus-rpc/sdk-go/nexus
 # github.com/pmezard/go-difflib v1.0.0
 ## explicit
 github.com/pmezard/go-difflib/difflib
+# github.com/revrost/go-openrouter v1.1.5
+## explicit; go 1.23
+github.com/revrost/go-openrouter
+github.com/revrost/go-openrouter/jsonschema
 # github.com/robfig/cron v1.2.0
 ## explicit
 github.com/robfig/cron

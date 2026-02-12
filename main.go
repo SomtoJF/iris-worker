@@ -3,7 +3,9 @@ package main
 import (
 	"log"
 
+	"github.com/SomtoJF/iris-worker/activity/llm"
 	sqldbActivities "github.com/SomtoJF/iris-worker/activity/sqldb"
+	"github.com/SomtoJF/iris-worker/common"
 	"github.com/SomtoJF/iris-worker/initializers/sqldb"
 	"github.com/SomtoJF/iris-worker/workflow/jobapplication"
 	"go.temporal.io/sdk/client"
@@ -24,6 +26,12 @@ func init() {
 }
 
 func main() {
+	dependencies, err := common.MakeDependencies()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer dependencies.Cleanup()
+
 	c, err := client.Dial(client.Options{})
 
 	if err != nil {
@@ -35,7 +43,7 @@ func main() {
 	w := worker.New(c, string(JobApplicationTaskQueueName), worker.Options{})
 
 	registerJobApplicationWorkflows(w)
-	registerJobApplicationActivities(w)
+	registerJobApplicationActivities(w, dependencies)
 
 	// Start listening to the Task Queue.
 	err = w.Run(worker.InterruptCh())
@@ -48,7 +56,10 @@ func registerJobApplicationWorkflows(w worker.Worker) {
 	w.RegisterWorkflow(jobapplication.JobApplicationWorkflow)
 }
 
-func registerJobApplicationActivities(w worker.Worker) {
+func registerJobApplicationActivities(w worker.Worker, dependencies common.Dependencies) {
 	sqldbActivities := sqldbActivities.NewActivities(sqldb.DB)
 	w.RegisterActivity(sqldbActivities)
+
+	llmActivities := llm.NewActivity(dependencies.GetAIPIClient())
+	w.RegisterActivity(llmActivities)
 }
