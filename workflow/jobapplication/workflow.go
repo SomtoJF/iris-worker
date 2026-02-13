@@ -28,16 +28,23 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	}
 	ctx = workflow.WithActivityOptions(ctx, activityOptions)
 
-	if err := workflow.ExecuteActivity(ctx, "UpdateJobApplication", sqldb.UpdateJobApplicationInput{
-		IdJobApplication: input.IdJobApplication,
-		Data: map[string]interface{}{
-			"status": "applied",
-		},
-	}).Get(ctx, nil); err != nil {
-		return err
+	isApplicationComplete := false
+	for !isApplicationComplete {
+		isApplicationComplete = true
 	}
+
+	updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusApplied)
 
 	fmt.Println("JobApplicationWorkflow started", "url", input.Url)
 
 	return nil
+}
+
+func updateJobApplicationStatus(ctx workflow.Context, idJobApplication uint, status sqldb.JobApplicationStatus) error {
+	return workflow.ExecuteActivity(ctx, "UpdateJobApplication", sqldb.UpdateJobApplicationInput{
+		IdJobApplication: idJobApplication,
+		Data: map[string]interface{}{
+			"status": status,
+		},
+	}).Get(ctx, nil)
 }
