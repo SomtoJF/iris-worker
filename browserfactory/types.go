@@ -8,6 +8,8 @@ import (
 type BrowserClient interface {
 	GetBrowser() *rod.Browser
 	ScreenshotForLLM(*rod.Page, string) (string, []*TaggedAccessibilityNode, error)
+	OpenUrl(page *rod.Page, url string) *rod.Page
+	OpenPageNewTab(browser *rod.Browser, url string) *rod.Page
 }
 
 type TaggedAccessibilityNode struct {

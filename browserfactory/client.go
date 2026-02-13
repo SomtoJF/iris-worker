@@ -51,6 +51,14 @@ func (b *BrowserFactory) ScreenshotForLLM(page *rod.Page, fileName string) (stri
 	return screenshotPath, taggedNodes, nil
 }
 
+func (b *BrowserFactory) OpenUrl(page *rod.Page, url string) *rod.Page {
+	return page.MustNavigate(url)
+}
+
+func (b *BrowserFactory) OpenPageNewTab(browser *rod.Browser, url string) *rod.Page {
+	return browser.MustPage(url).MustWindowFullscreen()
+}
+
 func getPageAccessibilityTree(page *rod.Page) ([]*proto.AccessibilityAXNode, error) {
 	res, err := proto.AccessibilityGetFullAXTree{}.Call(page)
 	if err != nil {
