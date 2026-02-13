@@ -15,7 +15,9 @@ type JobApplicationWorkflowInput struct {
 }
 
 func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowInput) error {
-	workflow.GetLogger(ctx).Info("JobApplicationWorkflow started", "url", input.Url)
+	logger := workflow.GetLogger(ctx)
+
+	logger.Info("JobApplicationWorkflow started", "url", input.Url)
 
 	activityOptions := workflow.ActivityOptions{
 		StartToCloseTimeout: 5 * time.Minute,
@@ -28,14 +30,49 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	}
 	ctx = workflow.WithActivityOptions(ctx, activityOptions)
 
+	// TODO: Open the job posting url
+
 	isApplicationComplete := false
-	for !isApplicationComplete {
-		isApplicationComplete = true
+	toolCallHistory := []ToolCallResult{}
+	const maxAgentIterations = 20
+
+	for iteration := 0; !isApplicationComplete && iteration < maxAgentIterations; iteration++ {
+		// TODO: Take a screenshot of the current page and feed to the planner
+
+		plannerRequest := PlannerRequest{
+			JobPostingUrl:   input.Url,
+			ToolCallHistory: toolCallHistory,
+		}
+
+		plannerResponse, err := planNextAction(ctx, plannerRequest)
+		if err != nil {
+			logger.Error("Failed to plan next action", "error", err)
+			return err
+		}
+		isApplicationComplete = plannerResponse.IsApplicationComplete
+		toolCalls := plannerResponse.ToolCalls
+
+		results, err := executeToolCalls(ctx, toolCalls)
+		if err != nil {
+			logger.Error("Failed to execute tool calls", "error", err)
+			return err
+		}
+
+		toolCallHistory = append(toolCallHistory, results...)
 	}
 
-	updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusApplied)
+	if !isApplicationComplete {
+		if err := updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed); err != nil {
+			logger.Error("Failed to update job application status", "error", err)
+			return err
+		}
+		logger.Warn("Job application not complete after %d iterations", maxAgentIterations)
+		return fmt.Errorf("job application not complete after %d iterations", maxAgentIterations)
+	}
 
-	fmt.Println("JobApplicationWorkflow started", "url", input.Url)
+	if err := updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusApplied); err != nil {
+		logger.Error("Failed to update job application status", "error", err)
+	}
 
 	return nil
 }
