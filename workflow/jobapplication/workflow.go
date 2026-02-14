@@ -39,12 +39,14 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	})
 	if err != nil {
 		logger.Error("Failed to create session", "error", err)
+		updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
 		return err
 	}
 	defer workflow.CompleteSession(sessionCtx)
 
 	if err := openWebpage(sessionCtx, workflowId, input.Url); err != nil {
 		logger.Error("Failed to open webpage", "error", err)
+		updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
 		return err
 	}
 
@@ -66,6 +68,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		}).Get(sessionCtx, &screenshot)
 		if err != nil {
 			logger.Error("Failed to take screenshot", "error", err)
+			updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
 			return err
 		}
 
@@ -79,6 +82,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		plannerResponse, err := planNextAction(ctx, plannerRequest)
 		if err != nil {
 			logger.Error("Failed to plan next action", "error", err)
+			updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
 			return err
 		}
 		isApplicationComplete = plannerResponse.IsApplicationComplete
