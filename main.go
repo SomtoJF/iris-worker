@@ -6,6 +6,7 @@ import (
 	"github.com/SomtoJF/iris-worker/activity/browser"
 	"github.com/SomtoJF/iris-worker/activity/llm"
 	sqldbActivities "github.com/SomtoJF/iris-worker/activity/sqldb"
+	"github.com/SomtoJF/iris-worker/activity/web"
 	"github.com/SomtoJF/iris-worker/common"
 	"github.com/SomtoJF/iris-worker/initializers/sqldb"
 	"github.com/SomtoJF/iris-worker/workflow/jobapplication"
@@ -70,6 +71,9 @@ func registerJobApplicationActivities(w worker.Worker, dependencies common.Depen
 
 	browserActivities := browser.NewActivities(dependencies.GetBrowserClient())
 	w.RegisterActivity(browserActivities)
+
+	webActivities := web.NewActivity()
+	w.RegisterActivity(webActivities)
 }
 
 func loadTemplates() {

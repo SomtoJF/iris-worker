@@ -56,6 +56,13 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		}).Get(sessionCtx, nil)
 	}()
 
+	userResume, err := processUserResume(sessionCtx, workflowId)
+	if err != nil {
+		logger.Error("Failed to process user resume", "error", err)
+		updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
+		return err
+	}
+
 	isApplicationComplete := false
 	toolCallHistory := []ToolCallResult{}
 	const maxAgentIterations = 20
@@ -77,6 +84,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 			ScreenshotPath:  screenshot.Path,
 			TaggedNodes:     screenshot.TaggedNodes,
 			ToolCallHistory: toolCallHistory,
+			UserResume:      userResume,
 		}
 
 		plannerResponse, err := planNextAction(ctx, plannerRequest)
@@ -123,4 +131,9 @@ func updateJobApplicationStatus(ctx workflow.Context, idJobApplication uint, sta
 			"status": status,
 		},
 	}).Get(ctx, nil)
+}
+
+// TODO: Implement this function
+func processUserResume(ctx workflow.Context, workflowID string) (string, error) {
+	return "", nil
 }

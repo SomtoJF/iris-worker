@@ -44,6 +44,7 @@ type PlannerResponse struct {
 
 type PlannerRequest struct {
 	JobPostingUrl   string                                  `json:"job_posting_url"`
+	UserResume      string                                  `json:"user_resume"`
 	ScreenshotPath  string                                  `json:"screenshot_path"`
 	TaggedNodes     []browserfactory.SerializableTaggedNode `json:"tagged_nodes"`
 	ToolCallHistory []ToolCallResult                        `json:"tool_call_history"`
@@ -74,6 +75,14 @@ var toolActivityNameMap = map[string]ToolActivity{
 	"navigate": {
 		ActivityName: "Navigate",
 		Description:  "Navigate to a new URL",
+	},
+	"web_scrape": {
+		ActivityName: "ScrapeWebPage",
+		Description:  "Scrape the web page for the given URL",
+	},
+	"retrieve_job_description": {
+		ActivityName: "ScrapeWebPage",
+		Description:  "Retrieve the job description using the url of the job description page",
 	},
 }
 
@@ -150,15 +159,45 @@ var toolRequestStructureMap = map[string]map[string]interface{}{
 		},
 		"required": []string{"page_index"},
 	},
+	"web_scrape": {
+		"type": "object",
+		"properties": map[string]interface{}{
+			"url": map[string]interface{}{
+				"type": "string",
+			},
+		},
+		"required": []string{"url"},
+	},
+	"retrieve_job_description": {
+		"type": "object",
+		"properties": map[string]interface{}{
+			"url": map[string]interface{}{
+				"type": "string",
+			},
+		},
+		"required": []string{"url"},
+	},
 }
 
 func SetTemplates() {
 	var err error
-	Templates.Planner.System, err = helper.LoadTemplate("workflow/jobapplication/prompt/system.go.tmpl")
+
+	// Define template functions
+	funcMap := template.FuncMap{
+		"add": func(a, b int) int {
+			return a + b
+		},
+		"json": func(v interface{}) string {
+			b, _ := json.Marshal(v)
+			return string(b)
+		},
+	}
+
+	Templates.Planner.System, err = helper.LoadTemplateWithFuncs("workflow/jobapplication/prompt/system.go.tmpl", funcMap)
 	if err != nil {
 		panic(err)
 	}
-	Templates.Planner.User, err = helper.LoadTemplate("workflow/jobapplication/prompt/user.go.tmpl")
+	Templates.Planner.User, err = helper.LoadTemplateWithFuncs("workflow/jobapplication/prompt/user.go.tmpl", funcMap)
 	if err != nil {
 		panic(err)
 	}
@@ -230,7 +269,41 @@ func executeToolCall(ctx workflow.Context, workflowID string, toolCall ToolCall)
 }
 
 func getPlannerResponseSchema() map[string]interface{} {
-	return map[string]interface{}{}
+	// Build tool schemas with oneOf pattern for conditional validation
+	toolSchemas := make([]map[string]interface{}, 0, len(toolRequestStructureMap))
+	for toolName, schema := range toolRequestStructureMap {
+		toolSchema := map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"name": map[string]interface{}{
+					"type": "string",
+					"enum": []string{toolName},
+				},
+				"arguments": schema,
+			},
+			"required": []string{"name", "arguments"},
+		}
+		toolSchemas = append(toolSchemas, toolSchema)
+	}
+
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"is_application_complete": map[string]interface{}{
+				"type":        "boolean",
+				"description": "Whether the job application has been successfully completed",
+			},
+			"tool_call": map[string]interface{}{
+				"oneOf":       toolSchemas,
+				"description": "The next tool to execute, if any",
+			},
+			"reasoning": map[string]interface{}{
+				"type":        "string",
+				"description": "Brief explanation of the decision and next action",
+			},
+		},
+		"required": []string{"is_application_complete", "reasoning"},
+	}
 }
 
 func getBase64Screenshot(ctx workflow.Context, screenshotPath string) (string, error) {

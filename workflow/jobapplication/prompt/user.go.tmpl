@@ -1,0 +1,30 @@
+## Current Task
+Apply to the job posting at: {{.JobPostingUrl}}
+
+## User Resume
+{{.UserResume}}
+
+## Current Page State
+
+### Interactive Elements
+{{if .TaggedNodes}}The following elements are visible and interactive on the current page:
+{{range .TaggedNodes}}
+- {{.Description}} (index: {{.Index}}, position: x={{printf "%.0f" .X}} y={{printf "%.0f" .Y}})
+{{end}}{{else}}No interactive elements detected on the current page.{{end}}
+
+## Action History
+{{if .ToolCallHistory}}Previous actions taken in this session:
+{{range $i, $call := .ToolCallHistory}}
+{{add $i 1}}. Tool: {{$call.Name}}
+   Arguments: {{json $call.Arguments}}
+   {{if $call.Error}}Error: {{$call.Error}}{{else if $call.Result}}Result: Success{{end}}
+{{end}}{{else}}No actions taken yet. This is the first interaction.{{end}}
+
+## Instructions
+Analyze the current page screenshot and determine the next action to complete the job application. Remember to:
+1. Retrieve the job description first if you haven't already
+2. Check what form fields need to be filled
+3. Use the user's resume information to complete the application
+4. Submit when all required fields are complete
+
+Respond with your decision in the required JSON format.
