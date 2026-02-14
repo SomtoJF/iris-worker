@@ -41,6 +41,8 @@ func main() {
 
 	defer c.Close()
 
+	loadTemplates()
+
 	w := worker.New(c, string(JobApplicationTaskQueueName), worker.Options{
 		EnableSessionWorker: true,
 	})
@@ -68,4 +70,8 @@ func registerJobApplicationActivities(w worker.Worker, dependencies common.Depen
 
 	browserActivities := browser.NewActivities(dependencies.GetBrowserClient())
 	w.RegisterActivity(browserActivities)
+}
+
+func loadTemplates() {
+	jobapplication.SetTemplates()
 }
