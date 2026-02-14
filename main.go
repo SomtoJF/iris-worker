@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 
+	"github.com/SomtoJF/iris-worker/activity/browser"
 	"github.com/SomtoJF/iris-worker/activity/llm"
 	sqldbActivities "github.com/SomtoJF/iris-worker/activity/sqldb"
 	"github.com/SomtoJF/iris-worker/common"
@@ -40,7 +41,9 @@ func main() {
 
 	defer c.Close()
 
-	w := worker.New(c, string(JobApplicationTaskQueueName), worker.Options{})
+	w := worker.New(c, string(JobApplicationTaskQueueName), worker.Options{
+		EnableSessionWorker: true,
+	})
 
 	registerJobApplicationWorkflows(w)
 	registerJobApplicationActivities(w, dependencies)
@@ -62,4 +65,7 @@ func registerJobApplicationActivities(w worker.Worker, dependencies common.Depen
 
 	llmActivities := llm.NewActivity(dependencies.GetAIPIClient())
 	w.RegisterActivity(llmActivities)
+
+	browserActivities := browser.NewActivities(dependencies.GetBrowserClient())
+	w.RegisterActivity(browserActivities)
 }

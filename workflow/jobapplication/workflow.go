@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/SomtoJF/iris-worker/activity/browser"
 	"github.com/SomtoJF/iris-worker/activity/sqldb"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
@@ -30,17 +31,48 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	}
 	ctx = workflow.WithActivityOptions(ctx, activityOptions)
 
-	// TODO: Open the job posting url
+	workflowId := workflow.GetInfo(ctx).WorkflowExecution.ID
+
+	sessionCtx, err := workflow.CreateSession(ctx, &workflow.SessionOptions{
+		ExecutionTimeout: 30 * time.Minute,
+		CreationTimeout:  time.Minute,
+	})
+	if err != nil {
+		logger.Error("Failed to create session", "error", err)
+		return err
+	}
+	defer workflow.CompleteSession(sessionCtx)
+
+	if err := openWebpage(sessionCtx, workflowId, input.Url); err != nil {
+		logger.Error("Failed to open webpage", "error", err)
+		return err
+	}
+
+	defer func() {
+		workflow.ExecuteActivity(sessionCtx, "ClosePage", browser.ClosePageInput{
+			WorkflowID: workflowId,
+		}).Get(sessionCtx, nil)
+	}()
 
 	isApplicationComplete := false
 	toolCallHistory := []ToolCallResult{}
 	const maxAgentIterations = 20
 
 	for iteration := 0; !isApplicationComplete && iteration < maxAgentIterations; iteration++ {
-		// TODO: Take a screenshot of the current page and feed to the planner
+		var screenshot browser.TakeScreenshotOutput
+		err = workflow.ExecuteActivity(sessionCtx, "TakeScreenshot", browser.TakeScreenshotInput{
+			WorkflowID: workflowId,
+			FileName:   fmt.Sprintf("screenshot_%d.png", iteration),
+		}).Get(sessionCtx, &screenshot)
+		if err != nil {
+			logger.Error("Failed to take screenshot", "error", err)
+			return err
+		}
 
 		plannerRequest := PlannerRequest{
 			JobPostingUrl:   input.Url,
+			ScreenshotPath:  screenshot.Path,
+			TaggedNodes:     screenshot.TaggedNodes,
 			ToolCallHistory: toolCallHistory,
 		}
 
@@ -50,15 +82,11 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 			return err
 		}
 		isApplicationComplete = plannerResponse.IsApplicationComplete
-		toolCalls := plannerResponse.ToolCalls
 
-		results, err := executeToolCalls(ctx, toolCalls)
-		if err != nil {
-			logger.Error("Failed to execute tool calls", "error", err)
-			return err
+		if plannerResponse.ToolCall != nil {
+			result := executeToolCall(sessionCtx, workflowId, *plannerResponse.ToolCall)
+			toolCallHistory = append(toolCallHistory, result)
 		}
-
-		toolCallHistory = append(toolCallHistory, results...)
 	}
 
 	if !isApplicationComplete {
@@ -75,6 +103,13 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	}
 
 	return nil
+}
+
+func openWebpage(ctx workflow.Context, workflowID string, url string) error {
+	return workflow.ExecuteActivity(ctx, "OpenWebpage", browser.OpenWebpageInput{
+		Url:        url,
+		WorkflowID: workflowID,
+	}).Get(ctx, nil)
 }
 
 func updateJobApplicationStatus(ctx workflow.Context, idJobApplication uint, status sqldb.JobApplicationStatus) error {

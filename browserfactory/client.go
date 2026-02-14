@@ -56,7 +56,9 @@ func (b *BrowserFactory) OpenUrl(page *rod.Page, url string) *rod.Page {
 }
 
 func (b *BrowserFactory) OpenPageNewTab(browser *rod.Browser, url string) *rod.Page {
-	return browser.MustPage(url).MustWindowFullscreen()
+	page := browser.MustPage(url).MustWindowFullscreen()
+	page.MustWaitStable()
+	return page
 }
 
 func getPageAccessibilityTree(page *rod.Page) ([]*proto.AccessibilityAXNode, error) {
