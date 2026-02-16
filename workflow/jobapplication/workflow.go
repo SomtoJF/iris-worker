@@ -56,7 +56,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		}).Get(sessionCtx, nil)
 	}()
 
-	userResume, err := processUserResume(sessionCtx, workflowId)
+	userResume, err := fetchUserResume(sessionCtx)
 	if err != nil {
 		logger.Error("Failed to process user resume", "error", err)
 		updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
@@ -84,7 +84,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 			ScreenshotPath:  screenshot.Path,
 			TaggedNodes:     screenshot.TaggedNodes,
 			ToolCallHistory: toolCallHistory,
-			UserResume:      userResume,
+			UserResume:      userResume.Content,
 		}
 
 		plannerResponse, err := planNextAction(ctx, plannerRequest)
@@ -133,7 +133,10 @@ func updateJobApplicationStatus(ctx workflow.Context, idJobApplication uint, sta
 	}).Get(ctx, nil)
 }
 
-// TODO: Implement this function
-func processUserResume(ctx workflow.Context, workflowID string) (string, error) {
-	return "", nil
+func fetchUserResume(ctx workflow.Context) (sqldb.Resume, error) {
+	var resume sqldb.Resume
+	if err := workflow.ExecuteActivity(ctx, "FetchActiveUserResume", nil).Get(ctx, &resume); err != nil {
+		return sqldb.Resume{}, err
+	}
+	return resume, nil
 }
