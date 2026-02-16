@@ -3,8 +3,11 @@ module github.com/SomtoJF/iris-worker
 go 1.25.3
 
 require (
+	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/go-rod/rod v0.116.2
+	github.com/gocolly/colly/v2 v2.3.0
 	github.com/google/uuid v1.6.0
+	github.com/joho/godotenv v1.5.1
 	github.com/revrost/go-openrouter v1.1.5
 	go.temporal.io/sdk v1.39.0
 	gorm.io/driver/sqlite v1.6.0
@@ -12,7 +15,6 @@ require (
 )
 
 require (
-	github.com/JohannesKaufmann/html-to-markdown v1.6.0 // indirect
 	github.com/PuerkitoBio/goquery v1.11.0 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/antchfx/htmlquery v1.3.5 // indirect
@@ -22,12 +24,10 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/facebookgo/clock v0.0.0-20150410010913-600d898af40a // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
-	github.com/gocolly/colly/v2 v2.3.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
-	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.2 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.22.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect

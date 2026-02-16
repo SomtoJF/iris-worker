@@ -11,10 +11,10 @@ import (
 )
 
 // rawSchema wraps a map to implement json.Marshaler
-type rawSchema map[string]interface{}
+type rawSchema map[string]any
 
 func (r rawSchema) MarshalJSON() ([]byte, error) {
-	return json.Marshal(map[string]interface{}(r))
+	return json.Marshal(map[string]any(r))
 }
 
 type OpenRouterProvider struct {
@@ -44,7 +44,10 @@ func (p *OpenRouterProvider) GetCompletion(ctx context.Context, req types.AIPIRe
 	if req.ResponseSchema != nil {
 		var schema json.Marshaler
 		// If ResponseSchema is already a map, wrap it; otherwise generate from struct
-		if schemaMap, ok := req.ResponseSchema.(map[string]interface{}); ok {
+		// Check both map[string]any and map[string]interface{} (they're the same but type assertion needs exact match)
+		if schemaMap, ok := req.ResponseSchema.(map[string]any); ok {
+			schema = rawSchema(schemaMap)
+		} else if schemaMap, ok := req.ResponseSchema.(map[string]interface{}); ok {
 			schema = rawSchema(schemaMap)
 		} else {
 			generatedSchema, err := jsonschema.GenerateSchemaForType(req.ResponseSchema)

@@ -8,6 +8,7 @@ import (
 	sqldbActivities "github.com/SomtoJF/iris-worker/activity/sqldb"
 	"github.com/SomtoJF/iris-worker/activity/web"
 	"github.com/SomtoJF/iris-worker/common"
+	"github.com/SomtoJF/iris-worker/initializers/env"
 	"github.com/SomtoJF/iris-worker/initializers/sqldb"
 	"github.com/SomtoJF/iris-worker/workflow/jobapplication"
 	"go.temporal.io/sdk/client"
@@ -22,6 +23,11 @@ const (
 
 func init() {
 	err := sqldb.ConnectToSQLite()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = env.LoadEnvVariables()
 	if err != nil {
 		log.Fatal(err)
 	}

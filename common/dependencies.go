@@ -1,6 +1,7 @@
 package common
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/SomtoJF/iris-worker/aipi"
@@ -34,8 +35,13 @@ func (d *dependencies) Cleanup() {
 }
 
 func MakeDependencies() (Dependencies, error) {
+	apiKey := os.Getenv("OPENROUTER_API_KEY")
+	if apiKey == "" {
+		return nil, fmt.Errorf("OPENROUTER_API_KEY environment variable is not set")
+	}
+
 	fs := fs.NewTemporaryFilesystem()
-	openrouterClient := openrouter.NewClient(os.Getenv("OPENROUTER_API_KEY"))
+	openrouterClient := openrouter.NewClient(apiKey)
 	return &dependencies{
 		aipiClient:    aipi.NewAIPIClient(openrouterClient),
 		browserClient: browserfactory.NewBrowserFactory(fs),
