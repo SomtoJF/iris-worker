@@ -2,12 +2,20 @@ package openrouter
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/SomtoJF/iris-worker/aipi/types"
 	"github.com/revrost/go-openrouter"
 	"github.com/revrost/go-openrouter/jsonschema"
 )
+
+// rawSchema wraps a map to implement json.Marshaler
+type rawSchema map[string]interface{}
+
+func (r rawSchema) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]interface{}(r))
+}
 
 type OpenRouterProvider struct {
 	client *openrouter.Client
@@ -34,9 +42,16 @@ func (p *OpenRouterProvider) GetCompletion(ctx context.Context, req types.AIPIRe
 	}
 
 	if req.ResponseSchema != nil {
-		schema, err := jsonschema.GenerateSchemaForType(req.ResponseSchema)
-		if err != nil {
-			return types.AIPIResponse{}, fmt.Errorf("failed to generate response schema: %w", err)
+		var schema json.Marshaler
+		// If ResponseSchema is already a map, wrap it; otherwise generate from struct
+		if schemaMap, ok := req.ResponseSchema.(map[string]interface{}); ok {
+			schema = rawSchema(schemaMap)
+		} else {
+			generatedSchema, err := jsonschema.GenerateSchemaForType(req.ResponseSchema)
+			if err != nil {
+				return types.AIPIResponse{}, fmt.Errorf("failed to generate response schema: %w", err)
+			}
+			schema = generatedSchema
 		}
 		chatReq.ResponseFormat = &openrouter.ChatCompletionResponseFormat{
 			Type: openrouter.ChatCompletionResponseFormatTypeJSONSchema,

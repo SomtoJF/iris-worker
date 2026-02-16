@@ -56,12 +56,38 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		}).Get(sessionCtx, nil)
 	}()
 
-	userResume, err := fetchUserResume(sessionCtx)
-	if err != nil {
-		logger.Error("Failed to process user resume", "error", err)
-		updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
-		return err
-	}
+	// userResume, err := fetchUserResume(sessionCtx)
+	// if err != nil {
+	// 	logger.Error("Failed to process user resume", "error", err)
+	// 	updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
+	// 	return err
+	// }
+
+	userResumeContent := `JANE DOE
+jane.doe@email.com | (555) 123-4567 | San Francisco, CA | linkedin.com/in/janedoe
+
+SUMMARY
+Software Engineer with 5+ years of experience building web applications and APIs. Strong in Go, Python, and TypeScript. Passionate about clean architecture and developer experience.
+
+EXPERIENCE
+
+Senior Software Engineer | Acme Corp | 2021 – Present
+- Led migration of legacy monolith to microservices; reduced deploy time by 60%
+- Built internal tooling in Go and TypeScript used by 50+ engineers
+- Mentored 3 junior developers; conducted code reviews and design reviews
+
+Software Engineer | TechStart Inc | 2018 – 2021
+- Developed REST and gRPC APIs in Go; improved latency by 40%
+- Wrote unit and integration tests; raised coverage from 60% to 85%
+- Collaborated with product and design on feature specs and UX
+
+EDUCATION
+B.S. Computer Science | State University | 2018
+
+SKILLS
+Languages: Go, Python, TypeScript, SQL
+Tools: Docker, Kubernetes, PostgreSQL, Redis, Temporal, Git
+`
 
 	isApplicationComplete := false
 	toolCallHistory := []ToolCallResult{}
@@ -84,7 +110,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 			ScreenshotPath:  screenshot.Path,
 			TaggedNodes:     screenshot.TaggedNodes,
 			ToolCallHistory: toolCallHistory,
-			UserResume:      userResume.Content,
+			UserResume:      userResumeContent,
 		}
 
 		plannerResponse, err := planNextAction(ctx, plannerRequest)

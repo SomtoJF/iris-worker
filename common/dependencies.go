@@ -35,8 +35,9 @@ func (d *dependencies) Cleanup() {
 
 func MakeDependencies() (Dependencies, error) {
 	fs := fs.NewTemporaryFilesystem()
+	openrouterClient := openrouter.NewClient(os.Getenv("OPENROUTER_API_KEY"))
 	return &dependencies{
-		aipiClient:    aipi.NewAIPIClient(openrouter.NewClient(os.Getenv("OPENROUTER_API_KEY"))),
+		aipiClient:    aipi.NewAIPIClient(openrouterClient),
 		browserClient: browserfactory.NewBrowserFactory(fs),
 		fs:            fs,
 	}, nil

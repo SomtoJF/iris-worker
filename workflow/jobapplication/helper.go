@@ -216,7 +216,7 @@ func planNextAction(ctx workflow.Context, input PlannerRequest) (PlannerResponse
 	}
 	userPrompt := userPromptBuf.String()
 
-	screenshotBase64, err := getBase64Screenshot(ctx, input.ScreenshotPath)
+	screenshotBase64, err := getBase64Screenshot(input.ScreenshotPath)
 	if err != nil {
 		return PlannerResponse{}, err
 	}
@@ -306,7 +306,7 @@ func getPlannerResponseSchema() map[string]interface{} {
 	}
 }
 
-func getBase64Screenshot(ctx workflow.Context, screenshotPath string) (string, error) {
+func getBase64Screenshot(screenshotPath string) (string, error) {
 	screenshot, err := os.ReadFile(screenshotPath)
 	if err != nil {
 		return "", err
