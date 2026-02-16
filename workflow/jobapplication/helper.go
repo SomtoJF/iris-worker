@@ -311,5 +311,8 @@ func getBase64Screenshot(screenshotPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return base64.StdEncoding.EncodeToString(screenshot), nil
+
+	base64Screenshot := base64.StdEncoding.EncodeToString(screenshot)
+
+	return fmt.Sprintf("data:image/jpeg;base64,%s", base64Screenshot), nil
 }
