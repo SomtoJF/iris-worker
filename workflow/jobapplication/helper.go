@@ -165,8 +165,11 @@ var toolRequestStructureMap = map[string]map[string]interface{}{
 			"url": map[string]interface{}{
 				"type": "string",
 			},
+			"advanced": map[string]interface{}{
+				"type": "boolean",
+			},
 		},
-		"required": []string{"url"},
+		"required": []string{"url", "advanced"},
 	},
 	"retrieve_job_description": {
 		"type": "object",
@@ -174,8 +177,11 @@ var toolRequestStructureMap = map[string]map[string]interface{}{
 			"url": map[string]interface{}{
 				"type": "string",
 			},
+			"advanced": map[string]interface{}{
+				"type": "boolean",
+			},
 		},
-		"required": []string{"url"},
+		"required": []string{"url", "advanced"},
 	},
 }
 

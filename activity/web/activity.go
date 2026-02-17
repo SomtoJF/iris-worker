@@ -1,13 +1,18 @@
 package web
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
-	"github.com/JohannesKaufmann/html-to-markdown"
+	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/gocolly/colly/v2"
 )
 
@@ -18,7 +23,8 @@ func NewActivity() *Activity {
 }
 
 type ScrapeWebPageInput struct {
-	Url string `json:"url"`
+	Url      string `json:"url"`
+	Advanced string `json:"advanced"`
 }
 
 type ScrapeWebPageOutput struct {
@@ -41,7 +47,13 @@ func (a *Activity) ScrapeWebPage(ctx context.Context, input ScrapeWebPageInput) 
 	errChan := make(chan error, 1)
 
 	go func() {
-		result, err := scrapeWithColly(input.Url, parsedURL.Host)
+		var result ScrapeWebPageOutput
+		var err error
+		if input.Advanced == "true" {
+			result, err = scrapeWithSerper(input.Url)
+		} else {
+			result, err = scrapeWithColly(input.Url, parsedURL.Host)
+		}
 		if err != nil {
 			errChan <- err
 			return
@@ -57,6 +69,42 @@ func (a *Activity) ScrapeWebPage(ctx context.Context, input ScrapeWebPageInput) 
 	case <-ctx.Done():
 		return ScrapeWebPageOutput{}, fmt.Errorf("scraping cancelled: %w", ctx.Err())
 	}
+}
+
+func scrapeWithSerper(targetURL string) (ScrapeWebPageOutput, error) {
+	apiKey := os.Getenv("SERPER_API_KEY")
+	if apiKey == "" {
+		return ScrapeWebPageOutput{}, fmt.Errorf("SERPER_API_KEY env var not set")
+	}
+
+	body, err := json.Marshal(map[string]string{"url": targetURL})
+	if err != nil {
+		return ScrapeWebPageOutput{}, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "https://scrape.serper.dev", bytes.NewReader(body))
+	if err != nil {
+		return ScrapeWebPageOutput{}, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("X-API-KEY", apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return ScrapeWebPageOutput{}, fmt.Errorf("serper request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return ScrapeWebPageOutput{}, fmt.Errorf("failed to read serper response: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ScrapeWebPageOutput{}, fmt.Errorf("serper returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return ScrapeWebPageOutput{Data: string(respBody)}, nil
 }
 
 func scrapeWithColly(targetURL, domain string) (ScrapeWebPageOutput, error) {

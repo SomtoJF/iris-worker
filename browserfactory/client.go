@@ -125,8 +125,6 @@ func tagAccessibilityNodes(page *rod.Page, accessibilityTree []*proto.Accessibil
 		element := getElementFromNode(page, node)
 		description := getDescriptionFromNode(node, i)
 
-		fmt.Println("description: ", description)
-
 		taggedNodes = append(taggedNodes, &TaggedAccessibilityNode{
 			Node:        node,
 			Element:     element,
