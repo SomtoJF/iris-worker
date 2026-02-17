@@ -10,6 +10,14 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
+// UserAction is the action the user needs to take when the workflow is blocked.
+type UserAction string
+
+const (
+	UserActionCaptcha        = "USER_ACTION_CAPTCHA"
+	UserActionAuthentication = "USER_ACTION_AUTHENTICATION"
+)
+
 type JobApplicationWorkflowInput struct {
 	IdJobApplication uint   `json:"id_job_application"`
 	Url              string `json:"url"`
@@ -56,38 +64,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		}).Get(sessionCtx, nil)
 	}()
 
-	// userResume, err := fetchUserResume(sessionCtx)
-	// if err != nil {
-	// 	logger.Error("Failed to process user resume", "error", err)
-	// 	updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
-	// 	return err
-	// }
-
-	userResumeContent := `JANE DOE
-jane.doe@email.com | (555) 123-4567 | San Francisco, CA | linkedin.com/in/janedoe
-
-SUMMARY
-Software Engineer with 5+ years of experience building web applications and APIs. Strong in Go, Python, and TypeScript. Passionate about clean architecture and developer experience.
-
-EXPERIENCE
-
-Senior Software Engineer | Acme Corp | 2021 – Present
-- Led migration of legacy monolith to microservices; reduced deploy time by 60%
-- Built internal tooling in Go and TypeScript used by 50+ engineers
-- Mentored 3 junior developers; conducted code reviews and design reviews
-
-Software Engineer | TechStart Inc | 2018 – 2021
-- Developed REST and gRPC APIs in Go; improved latency by 40%
-- Wrote unit and integration tests; raised coverage from 60% to 85%
-- Collaborated with product and design on feature specs and UX
-
-EDUCATION
-B.S. Computer Science | State University | 2018
-
-SKILLS
-Languages: Go, Python, TypeScript, SQL
-Tools: Docker, Kubernetes, PostgreSQL, Redis, Temporal, Git
-`
+	userResumeContent := getDummyUserResume()
 
 	isApplicationComplete := false
 	toolCallHistory := []ToolCallResult{}
@@ -119,7 +96,21 @@ Tools: Docker, Kubernetes, PostgreSQL, Redis, Temporal, Git
 			updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
 			return err
 		}
+
 		isApplicationComplete = plannerResponse.IsApplicationComplete
+		if isApplicationComplete {
+			break
+		}
+
+		if plannerResponse.RequiresUserAction {
+			err = awaitUserAction(ctx, workflowId, UserAction(plannerResponse.UserAction))
+			if err != nil {
+				logger.Error("Failed to await user action", "error", err)
+				updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
+				return err
+			}
+			continue
+		}
 
 		if plannerResponse.ToolCall != nil {
 			result := executeToolCall(sessionCtx, workflowId, *plannerResponse.ToolCall)
@@ -157,6 +148,79 @@ func updateJobApplicationStatus(ctx workflow.Context, idJobApplication uint, sta
 			"status": status,
 		},
 	}).Get(ctx, nil)
+}
+
+type NotifyHumanActivityInput struct {
+	Message    string `json:"message"`
+	WorkflowID string `json:"workflow_id"`
+}
+
+func awaitUserAction(ctx workflow.Context, workflowID string, userAction UserAction) error {
+	signalChan := workflow.GetSignalChannel(ctx, string(userAction))
+
+	notificationMessage := ""
+	switch userAction {
+	case UserActionCaptcha:
+		notificationMessage = "Need help with CAPTCHA"
+	case UserActionAuthentication:
+		notificationMessage = "Need help with authentication"
+	}
+
+	// Tell the UI/Human that we are blocked
+	// TODO: Implement this function
+	err := sendUserNotification(ctx, workflowID, notificationMessage)
+	if err != nil {
+		return err
+	}
+
+	// Create a 5-minute timeout timer
+	timerChan := workflow.NewTimer(ctx, 5*time.Minute)
+
+	// Wait for either the signal or the timeout
+	selector := workflow.NewSelector(ctx)
+	signalReceived := false
+	selector.AddReceive(signalChan, func(c workflow.ReceiveChannel, more bool) {
+		c.Receive(ctx, nil)
+		signalReceived = true
+	})
+	selector.AddFuture(timerChan, func(f workflow.Future) {
+		// Timer fired - timeout occurred
+	})
+	selector.Select(ctx)
+
+	if !signalReceived {
+		return fmt.Errorf("timeout waiting for user action %s after 5 minutes", userAction)
+	}
+	return nil
+}
+
+func getDummyUserResume() string {
+	userResumeContent := `JANE DOE
+jane.doe@email.com | (555) 123-4567 | San Francisco, CA | linkedin.com/in/janedoe
+
+SUMMARY
+Software Engineer with 5+ years of experience building web applications and APIs. Strong in Go, Python, and TypeScript. Passionate about clean architecture and developer experience.
+
+EXPERIENCE
+
+Senior Software Engineer | Acme Corp | 2021 – Present
+- Led migration of legacy monolith to microservices; reduced deploy time by 60%
+- Built internal tooling in Go and TypeScript used by 50+ engineers
+- Mentored 3 junior developers; conducted code reviews and design reviews
+
+Software Engineer | TechStart Inc | 2018 – 2021
+- Developed REST and gRPC APIs in Go; improved latency by 40%
+- Wrote unit and integration tests; raised coverage from 60% to 85%
+- Collaborated with product and design on feature specs and UX
+
+EDUCATION
+B.S. Computer Science | State University | 2018
+
+SKILLS
+Languages: Go, Python, TypeScript, SQL
+Tools: Docker, Kubernetes, PostgreSQL, Redis, Temporal, Git
+`
+	return userResumeContent
 }
 
 func fetchUserResume(ctx workflow.Context) (sqldb.Resume, error) {

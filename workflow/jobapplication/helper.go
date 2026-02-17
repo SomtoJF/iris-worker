@@ -37,9 +37,11 @@ type ToolCallResult struct {
 }
 
 type PlannerResponse struct {
-	IsApplicationComplete bool      `json:"is_application_complete"`
-	ToolCall              *ToolCall `json:"tool_call,omitempty"`
-	Reasoning             string    `json:"reasoning,omitempty"`
+	IsApplicationComplete bool       `json:"is_application_complete"`
+	RequiresUserAction    bool       `json:"requires_user_action"`
+	UserAction            UserAction `json:"user_action"`
+	ToolCall              *ToolCall  `json:"tool_call,omitempty"`
+	Reasoning             string     `json:"reasoning,omitempty"`
 }
 
 type PlannerRequest struct {
@@ -299,6 +301,20 @@ func getPlannerResponseSchema() map[string]interface{} {
 				"type":        "boolean",
 				"description": "Whether the job application has been successfully completed",
 			},
+			"requires_user_action": map[string]interface{}{
+				"type":        "boolean",
+				"description": "Whether the workflow requires user action to continue",
+			},
+			"user_action": map[string]interface{}{
+				"oneOf": []map[string]interface{}{
+					{
+						"type": "string",
+						"enum": []string{string(UserActionCaptcha), string(UserActionAuthentication)},
+					},
+					{"type": "null"},
+				},
+				"description": "The user action required; null if requires_user_action is false",
+			},
 			"tool_call": map[string]interface{}{
 				"oneOf":       toolSchemas,
 				"description": "The next tool to execute, if any",
@@ -308,7 +324,7 @@ func getPlannerResponseSchema() map[string]interface{} {
 				"description": "Brief explanation of the decision and next action",
 			},
 		},
-		"required": []string{"is_application_complete", "reasoning"},
+		"required": []string{"is_application_complete", "reasoning", "requires_user_action"},
 	}
 }
 
@@ -321,4 +337,10 @@ func getBase64Screenshot(screenshotPath string) (string, error) {
 	base64Screenshot := base64.StdEncoding.EncodeToString(screenshot)
 
 	return fmt.Sprintf("data:image/jpeg;base64,%s", base64Screenshot), nil
+}
+
+func sendUserNotification(ctx workflow.Context, workflowID string, message string) error {
+	// TODO: Implement this function
+	// Should send notification through redis pub/sub to the backend. Frontend should connect to realtime endpoint through SSE and listen for notifications.
+	return nil
 }
