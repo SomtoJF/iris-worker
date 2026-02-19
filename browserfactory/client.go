@@ -7,6 +7,7 @@ import (
 	"github.com/SomtoJF/iris-worker/initializers/fs"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
+	"github.com/go-rod/stealth"
 )
 
 type BrowserFactory struct {
@@ -56,7 +57,8 @@ func (b *BrowserFactory) OpenUrl(page *rod.Page, url string) *rod.Page {
 }
 
 func (b *BrowserFactory) OpenPageNewTab(browser *rod.Browser, url string) *rod.Page {
-	page := browser.MustPage(url).MustWindowFullscreen()
+	page := stealth.MustPage(browser).MustWindowFullscreen()
+	page.MustNavigate(url)
 	page.MustWaitStable()
 	return page
 }

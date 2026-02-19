@@ -5,6 +5,7 @@ go 1.25.3
 require (
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/go-rod/rod v0.116.2
+	github.com/go-rod/stealth v0.4.9
 	github.com/gocolly/colly/v2 v2.3.0
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
