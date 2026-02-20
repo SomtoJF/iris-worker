@@ -58,6 +58,23 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		return err
 	}
 
+	jobDetails, err := retrieveJobDetails(sessionCtx, input.Url)
+	if err != nil {
+		logger.Error("Failed to retrieve job details", "error", err)
+		updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
+		return err
+	}
+
+	if err := updateJobApplication(ctx, input.IdJobApplication, map[string]interface{}{
+		"job_title":       jobDetails.JobTitle,
+		"company_name":    jobDetails.CompanyName,
+		"job_description": jobDetails.JobDescription,
+	}); err != nil {
+		logger.Error("Failed to update job application", "error", err)
+		updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
+		return err
+	}
+
 	defer func() {
 		workflow.ExecuteActivity(sessionCtx, "ClosePage", browser.ClosePageInput{
 			WorkflowID: workflowId,
@@ -88,6 +105,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 			TaggedNodes:     screenshot.TaggedNodes,
 			ToolCallHistory: toolCallHistory,
 			UserResume:      userResumeContent,
+			JobDescription:  jobDetails.JobDescription,
 		}
 
 		plannerResponse, err := planNextAction(ctx, plannerRequest)
@@ -147,6 +165,13 @@ func updateJobApplicationStatus(ctx workflow.Context, idJobApplication uint, sta
 		Data: map[string]interface{}{
 			"status": status,
 		},
+	}).Get(ctx, nil)
+}
+
+func updateJobApplication(ctx workflow.Context, idJobApplication uint, data map[string]interface{}) error {
+	return workflow.ExecuteActivity(ctx, "UpdateJobApplication", sqldb.UpdateJobApplicationInput{
+		IdJobApplication: idJobApplication,
+		Data:             data,
 	}).Get(ctx, nil)
 }
 

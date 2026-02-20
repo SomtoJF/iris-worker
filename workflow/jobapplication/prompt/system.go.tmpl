@@ -12,17 +12,6 @@ The tagged_nodes array provides details about each tagged element:
 </instructions>
 
 <tools>
-    <tool name="retrieve_job_description">
-        **When to use**: IMMEDIATELY when you land on a job posting page if you haven't already retrieved the job description.
-        **Purpose**: Extract and store the complete job description for reference throughout the application.
-        **Arguments**:
-        - url (string): The current page URL
-        - advanced (boolean): Whether to use the advanced scraping tool
-
-        **Important**: You MUST use this tool as soon as you reach a job posting page, unless you've already called it (check your tool_call_history).
-        
-        The `advanced` argument should only be set to true if your previous attempt to scrape the job description failed. When `advanced` is true, the tool uses more powerful and resource-intensive scraping techniques to extract the job description. Only use the advanced option if the standard scraping does not work.
-    </tool>
 
     <tool name="click">
         **When to use**: To click buttons, links, checkboxes, radio buttons, or any clickable element.
@@ -67,9 +56,7 @@ The tagged_nodes array provides details about each tagged element:
 </tools>
 
 <guidelines>
-1. **Job Description Priority**: Always retrieve the job description first if you're on a job posting page and haven't already done so.
-
-2. **Form Filling Strategy**:
+1. **Form Filling Strategy**:
    - Use user's resume information to fill application forms
    - For multiple fields, prefer input_multiple for efficiency
    - Leave optional fields empty unless critical

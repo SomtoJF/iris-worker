@@ -46,6 +46,7 @@ type PlannerResponse struct {
 
 type PlannerRequest struct {
 	JobPostingUrl   string                                  `json:"job_posting_url"`
+	JobDescription  string                                  `json:"job_description"`
 	UserResume      string                                  `json:"user_resume"`
 	ScreenshotPath  string                                  `json:"screenshot_path"`
 	TaggedNodes     []browserfactory.SerializableTaggedNode `json:"tagged_nodes"`
@@ -343,4 +344,70 @@ func sendUserNotification(ctx workflow.Context, workflowID string, message strin
 	// TODO: Implement this function
 	// Should send notification through redis pub/sub to the backend. Frontend should connect to realtime endpoint through SSE and listen for notifications.
 	return nil
+}
+
+type JobDetails struct {
+	JobTitle       string `json:"job_title"`
+	CompanyName    string `json:"company_name"`
+	JobDescription string `json:"job_description"`
+}
+
+func retrieveJobDetails(ctx workflow.Context, url string) (JobDetails, error) {
+	// Scrape webpage with advanced mode (Serper)
+	var scrapeOutput map[string]interface{}
+	if err := workflow.ExecuteActivity(ctx, "ScrapeWebPage", map[string]interface{}{
+		"url":      url,
+		"advanced": "true",
+	}).Get(ctx, &scrapeOutput); err != nil {
+		return JobDetails{}, err
+	}
+
+	scrapedData, ok := scrapeOutput["data"].(string)
+	if !ok {
+		return JobDetails{}, fmt.Errorf("failed to get scraped data")
+	}
+
+	// Build LLM request to extract job details
+	systemPrompt := "Extract the job title, company name, and job description from the provided scraped webpage content. Return the data in JSON format."
+	userPrompt := fmt.Sprintf("Scraped content:\n\n%s", scrapedData)
+
+	llmRequest := types.AIPIRequest{
+		SystemMessage:  systemPrompt,
+		UserMessage:    userPrompt,
+		Model:          "google/gemini-2.0-flash-exp",
+		ResponseSchema: getJobDetailsResponseSchema(),
+	}
+
+	var llmResponse types.AIPIResponse
+	if err := workflow.ExecuteActivity(ctx, "CallLLM", llmRequest).Get(ctx, &llmResponse); err != nil {
+		return JobDetails{}, err
+	}
+
+	var jobDetails JobDetails
+	if err := json.Unmarshal([]byte(llmResponse.Content), &jobDetails); err != nil {
+		return JobDetails{}, err
+	}
+
+	return jobDetails, nil
+}
+
+func getJobDetailsResponseSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"job_title": map[string]interface{}{
+				"type":        "string",
+				"description": "The title of the job position",
+			},
+			"company_name": map[string]interface{}{
+				"type":        "string",
+				"description": "The name of the company posting the job",
+			},
+			"job_description": map[string]interface{}{
+				"type":        "string",
+				"description": "The full job description including responsibilities, requirements, and qualifications",
+			},
+		},
+		"required": []string{"job_title", "company_name", "job_description"},
+	}
 }
