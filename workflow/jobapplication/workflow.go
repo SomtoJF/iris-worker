@@ -21,6 +21,7 @@ const (
 type JobApplicationWorkflowInput struct {
 	IdJobApplication uint   `json:"id_job_application"`
 	Url              string `json:"url"`
+	IdUser           uint   `json:"id_user"`
 }
 
 func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowInput) error {
