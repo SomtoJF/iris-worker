@@ -53,6 +53,13 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	}
 	defer workflow.CompleteSession(sessionCtx)
 
+	userResume, err := fetchUserResume(ctx, input.IdUser)
+	if err != nil {
+		logger.Error("Failed to fetch user resume", "error", err)
+		updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
+		return err
+	}
+
 	if err := openWebpage(sessionCtx, workflowId, input.Url); err != nil {
 		logger.Error("Failed to open webpage", "error", err)
 		updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
@@ -82,8 +89,6 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		}).Get(sessionCtx, nil)
 	}()
 
-	userResumeContent := getDummyUserResume()
-
 	isApplicationComplete := false
 	toolCallHistory := []ToolCallResult{}
 	const maxAgentIterations = 20
@@ -105,7 +110,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 			ScreenshotPath:  screenshot.Path,
 			TaggedNodes:     screenshot.TaggedNodes,
 			ToolCallHistory: toolCallHistory,
-			UserResume:      userResumeContent,
+			UserResume:      userResume.Content,
 			JobDescription:  jobDetails.JobDescription,
 		}
 
@@ -220,38 +225,9 @@ func awaitUserAction(ctx workflow.Context, workflowID string, userAction UserAct
 	return nil
 }
 
-func getDummyUserResume() string {
-	userResumeContent := `JANE DOE
-jane.doe@email.com | (555) 123-4567 | San Francisco, CA | linkedin.com/in/janedoe
-
-SUMMARY
-Software Engineer with 5+ years of experience building web applications and APIs. Strong in Go, Python, and TypeScript. Passionate about clean architecture and developer experience.
-
-EXPERIENCE
-
-Senior Software Engineer | Acme Corp | 2021 – Present
-- Led migration of legacy monolith to microservices; reduced deploy time by 60%
-- Built internal tooling in Go and TypeScript used by 50+ engineers
-- Mentored 3 junior developers; conducted code reviews and design reviews
-
-Software Engineer | TechStart Inc | 2018 – 2021
-- Developed REST and gRPC APIs in Go; improved latency by 40%
-- Wrote unit and integration tests; raised coverage from 60% to 85%
-- Collaborated with product and design on feature specs and UX
-
-EDUCATION
-B.S. Computer Science | State University | 2018
-
-SKILLS
-Languages: Go, Python, TypeScript, SQL
-Tools: Docker, Kubernetes, PostgreSQL, Redis, Temporal, Git
-`
-	return userResumeContent
-}
-
-func fetchUserResume(ctx workflow.Context) (sqldb.Resume, error) {
+func fetchUserResume(ctx workflow.Context, idUser uint) (sqldb.Resume, error) {
 	var resume sqldb.Resume
-	if err := workflow.ExecuteActivity(ctx, "FetchActiveUserResume", nil).Get(ctx, &resume); err != nil {
+	if err := workflow.ExecuteActivity(ctx, "FetchActiveUserResume", idUser).Get(ctx, &resume); err != nil {
 		return sqldb.Resume{}, err
 	}
 	return resume, nil
