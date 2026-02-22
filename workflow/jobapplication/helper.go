@@ -374,7 +374,7 @@ func retrieveJobDetails(ctx workflow.Context, url string) (JobDetails, error) {
 	llmRequest := types.AIPIRequest{
 		SystemMessage:  systemPrompt,
 		UserMessage:    userPrompt,
-		Model:          "google/gemini-2.0-flash-exp",
+		Model:          "x-ai/grok-4.1-fast",
 		ResponseSchema: getJobDetailsResponseSchema(),
 	}
 
