@@ -53,7 +53,7 @@ func (b *BrowserFactory) ScreenshotForLLM(page *rod.Page, fileName string) (stri
 	var taggedNodes []*TaggedAccessibilityNode
 
 	err := rod.Try(func() {
-		page.MustWaitStable()
+		page.MustWaitLoad()
 		// Get the accessibility tree for the page
 		accessibilityTree, _ := getPageAccessibilityTree(page)
 

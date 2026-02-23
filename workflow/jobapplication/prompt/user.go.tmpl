@@ -1,29 +1,34 @@
-## Current Task
+<task>
 Apply to the job posting at: {{.JobPostingUrl}}
+</task>
 
-## User Resume
+<user_resume>
 {{.UserResume}}
+</user_resume>
 
-## Job Description
+<job_description>
 {{.JobDescription}}
+</job_description>
 
-## Current Page State
-
-### Interactive Elements
+<current_page>
+<interactive_elements>
 {{if .TaggedNodes}}The following elements are visible and interactive on the current page:
 {{range .TaggedNodes}}
 - {{.Description}} (index: {{.Index}}, position: x={{printf "%.0f" .X}} y={{printf "%.0f" .Y}})
 {{end}}{{else}}No interactive elements detected on the current page.{{end}}
+</interactive_elements>
+</current_page>
 
-## Action History
+<action_history>
 {{if .ToolCallHistory}}Previous actions taken in this session:
 {{range $i, $call := .ToolCallHistory}}
 {{add $i 1}}. Tool: {{$call.Name}}
    Arguments: {{json $call.Arguments}}
    {{if $call.Error}}Error: {{$call.Error}}{{else if $call.Result}}Result: Success{{end}}
 {{end}}{{else}}No actions taken yet. This is the first interaction.{{end}}
+</action_history>
 
-## Instructions
+<instructions>
 Analyze the current page screenshot and determine the next action to complete the job application. Remember to:
 1. Retrieve the job description first if you haven't already
 2. Check what form fields need to be filled
@@ -31,3 +36,4 @@ Analyze the current page screenshot and determine the next action to complete th
 4. Submit when all required fields are complete
 
 Respond with your decision in the required JSON format.
+</instructions>

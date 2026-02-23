@@ -70,10 +70,14 @@ func (a *Activity) TakeScreenshot(ctx context.Context, input TakeScreenshotInput
 func (a *Activity) Click(ctx context.Context, input ClickInput) error {
 	a.mu.Lock()
 	page, exists := a.activeSessions[input.WorkflowID]
+	incognitoCtx, ctxExists := a.incognitoContexts[input.WorkflowID]
 	a.mu.Unlock()
 
 	if !exists {
 		return fmt.Errorf("no active page for workflow %s", input.WorkflowID)
+	}
+	if !ctxExists {
+		return fmt.Errorf("no incognito context for workflow %s", input.WorkflowID)
 	}
 
 	_, taggedNodes, err := a.browserFactory.ScreenshotForLLM(page, "temp.png")
@@ -90,9 +94,28 @@ func (a *Activity) Click(ctx context.Context, input ClickInput) error {
 		return fmt.Errorf("element at index %d has no DOM element", input.ElementIndex)
 	}
 
+	pagesBefore := incognitoCtx.MustPages()
+	beforeCount := len(pagesBefore)
+
 	err = element.Click(proto.InputMouseButtonLeft, 1)
 	if err != nil {
 		return fmt.Errorf("failed to click element: %w", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	pagesAfter := incognitoCtx.MustPages()
+	afterCount := len(pagesAfter)
+
+	if afterCount > beforeCount {
+		newPage := pagesAfter[afterCount-1]
+		newPage.MustWaitLoad()
+
+		a.mu.Lock()
+		a.activeSessions[input.WorkflowID] = newPage
+		a.mu.Unlock()
+
+		page = newPage
 	}
 
 	page.MustWaitIdle()

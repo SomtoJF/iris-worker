@@ -278,27 +278,11 @@ func executeToolCall(ctx workflow.Context, workflowID string, toolCall ToolCall)
 }
 
 func getPlannerResponseSchema() map[string]interface{} {
-	// Build tool schemas with oneOf pattern for conditional validation
-	toolSchemas := make([]map[string]interface{}, 0, len(toolRequestStructureMap))
-	for toolName, schema := range toolRequestStructureMap {
-		toolSchema := map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"name": map[string]interface{}{
-					"type": "string",
-					"enum": []string{toolName},
-				},
-				"arguments": schema,
-			},
-			"required": []string{"name", "arguments"},
-		}
-		toolSchemas = append(toolSchemas, toolSchema)
+	// Build list of tool names for enum
+	toolNames := make([]string, 0, len(toolRequestStructureMap))
+	for toolName := range toolRequestStructureMap {
+		toolNames = append(toolNames, toolName)
 	}
-
-	// Allow null so the model can explicitly output "no tool" without validation failing.
-	toolCallOneOf := make([]map[string]interface{}, 0, len(toolSchemas)+1)
-	toolCallOneOf = append(toolCallOneOf, map[string]interface{}{"type": "null"})
-	toolCallOneOf = append(toolCallOneOf, toolSchemas...)
 
 	return map[string]interface{}{
 		"type": "object",
@@ -322,7 +306,22 @@ func getPlannerResponseSchema() map[string]interface{} {
 				"description": "The user action required; null if requires_user_action is false",
 			},
 			"tool_call": map[string]interface{}{
-				"oneOf":       toolCallOneOf,
+				"anyOf": []map[string]interface{}{
+					{"type": "null"},
+					{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"name": map[string]interface{}{
+								"type": "string",
+								"enum": toolNames,
+							},
+							"arguments": map[string]interface{}{
+								"type": "object",
+							},
+						},
+						"required": []string{"name", "arguments"},
+					},
+				},
 				"description": "The next tool to execute, or null when no action is needed",
 			},
 			"reasoning": map[string]interface{}{

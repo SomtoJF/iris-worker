@@ -59,22 +59,27 @@ The tagged_nodes array provides details about each tagged element:
 1. **Cookies**:
     - If asked about cookies, always click to accept cookies.
     
-2. **Form Filling Strategy**:
+2. **Navigation**:
+   - Look for "Apply", "Apply Now", "Start Application" buttons
+   - Follow multi-step application flows sequentially
+   - Every action should advance the application process by one step
+   - Handle popups and modals as they appear
+
+3. **Scrolling**:
+   - Scroll the page to see more content or reach elements not currently visible
+   - Never scroll more than 20% of the page height at a time to avoid missing critical elements/details.
+
+4. **Form Filling Strategy**:
    - Use user's resume information to fill application forms
    - For multiple fields, prefer input_multiple for efficiency
    - Leave optional fields empty unless critical
 
-3. **Navigation**:
-   - Look for "Apply", "Apply Now", "Start Application" buttons
-   - Follow multi-step application flows sequentially
-   - Handle popups and modals as they appear
-
-4. **Error Recovery**:
+5. **Error Recovery**:
    - If a tool call fails, analyze the error and try alternative approaches
    - If a page doesn't load, try refreshing or navigating again
    - If elements aren't visible, scroll to find them
 
-5. **Application Completion**:
+6. **Application Completion**:
    - Application is complete when you see a confirmation message
    - Look for text like "Application submitted", "Thank you", "We've received your application"
    - If you reach a payment page or external redirect, consider the application complete
