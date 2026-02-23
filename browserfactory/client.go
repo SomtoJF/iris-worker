@@ -6,20 +6,41 @@ import (
 
 	"github.com/SomtoJF/iris-worker/initializers/fs"
 	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
 	"github.com/go-rod/stealth"
 )
+
+const existingSessionPort = "37712" // UserMode default port; connect here if launch fails
 
 type BrowserFactory struct {
 	browser *rod.Browser
 	fs      *fs.TemporaryFileSystem
 }
 
-func NewBrowserFactory(fs *fs.TemporaryFileSystem) *BrowserFactory {
-	return &BrowserFactory{
-		browser: rod.New().MustConnect().NoDefaultDevice(),
-		fs:      fs,
+// NewBrowserFactory tries to launch a new browser first; on failure it tries to connect
+// to an existing session on port 37712 (e.g. Chrome started with --remote-debugging-port=37712).
+func NewBrowserFactory(fs *fs.TemporaryFileSystem) (*BrowserFactory, error) {
+	// 1. Try to launch a new browser (default launcher, fresh instance).
+	u, launchErr := launcher.New().Launch()
+	if launchErr == nil {
+		browser := rod.New().ControlURL(u)
+		if err := browser.Connect(); err != nil {
+			return nil, fmt.Errorf("launched browser but failed to connect: %w", err)
+		}
+		return &BrowserFactory{browser: browser.NoDefaultDevice(), fs: fs}, nil
 	}
+
+	// 2. Fallback: connect to existing session (e.g. user started Chrome with --remote-debugging-port=37712).
+	existingURL, resolveErr := launcher.ResolveURL(existingSessionPort)
+	if resolveErr != nil {
+		return nil, fmt.Errorf("failed to launch browser: %w; failed to connect to existing session on port %s: %w", launchErr, existingSessionPort, resolveErr)
+	}
+	browser := rod.New().ControlURL(existingURL)
+	if err := browser.Connect(); err != nil {
+		return nil, fmt.Errorf("failed to launch browser: %w; existing session on port %s unreachable: %w", launchErr, existingSessionPort, err)
+	}
+	return &BrowserFactory{browser: browser.NoDefaultDevice(), fs: fs}, nil
 }
 
 func (b *BrowserFactory) GetBrowser() *rod.Browser {
@@ -57,7 +78,8 @@ func (b *BrowserFactory) OpenUrl(page *rod.Page, url string) *rod.Page {
 }
 
 func (b *BrowserFactory) OpenPageNewTab(browser *rod.Browser, url string) *rod.Page {
-	page := stealth.MustPage(browser).MustWindowFullscreen()
+	ctx := browser.MustIncognito()
+	page := stealth.MustPage(ctx).MustWindowFullscreen()
 	page.MustNavigate(url)
 	page.MustWaitStable()
 	return page

@@ -295,6 +295,11 @@ func getPlannerResponseSchema() map[string]interface{} {
 		toolSchemas = append(toolSchemas, toolSchema)
 	}
 
+	// Allow null so the model can explicitly output "no tool" without validation failing.
+	toolCallOneOf := make([]map[string]interface{}, 0, len(toolSchemas)+1)
+	toolCallOneOf = append(toolCallOneOf, map[string]interface{}{"type": "null"})
+	toolCallOneOf = append(toolCallOneOf, toolSchemas...)
+
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
@@ -317,8 +322,8 @@ func getPlannerResponseSchema() map[string]interface{} {
 				"description": "The user action required; null if requires_user_action is false",
 			},
 			"tool_call": map[string]interface{}{
-				"oneOf":       toolSchemas,
-				"description": "The next tool to execute, if any",
+				"oneOf":       toolCallOneOf,
+				"description": "The next tool to execute, or null when no action is needed",
 			},
 			"reasoning": map[string]interface{}{
 				"type":        "string",

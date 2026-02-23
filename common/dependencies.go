@@ -42,9 +42,13 @@ func MakeDependencies() (Dependencies, error) {
 
 	fs := fs.NewTemporaryFilesystem()
 	openrouterClient := openrouter.NewClient(apiKey)
+	browserClient, err := browserfactory.NewBrowserFactory(fs)
+	if err != nil {
+		return nil, fmt.Errorf("browser: %w", err)
+	}
 	return &dependencies{
 		aipiClient:    aipi.NewAIPIClient(openrouterClient),
-		browserClient: browserfactory.NewBrowserFactory(fs),
+		browserClient: browserClient,
 		fs:            fs,
 	}, nil
 }
