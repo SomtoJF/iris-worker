@@ -2,8 +2,20 @@
 
 - [ x ] Implement user auth backend
 - [ x ] Implement user auth frontend
-- [ ] Figure out captcha avoidance
-- [ ] Wire in Redis Pub/Sub to worker repo
 - [ x ] Implement resume upload
+- [ ] Implement File Upload tool
+- [ ] Implement Cover Letter tool
+- [ ] Collect more information from the user (onboarding) -- Need:
+  - Phone Number
+  - Gender
+  - Race
+  - Veteran Status
+  - Date of Birth (Compute Age on the fly)
+  - Email Address
+  - Linkedin
+  - Country of Residence
+  - Citizenships
+- [ ] Wire in Redis Pub/Sub to worker repo
+- [ ] Figure out captcha avoidance
 - [ ] Research the best and cheapest google job search tool
 - [ ] Implement job search
