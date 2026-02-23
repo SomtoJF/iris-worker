@@ -64,6 +64,12 @@ func (b *BrowserFactory) ScreenshotForLLM(page *rod.Page, fileName string) (stri
 
 		page.MustScreenshot(screenshotPath)
 
+		// Remove the grid and tags from the page to avoid accumulation
+		page.MustEval(`() => {
+			document.getElementById('agent-grid')?.remove();
+			document.querySelectorAll('.agent-tag').forEach(el => el.remove());
+		}`)
+
 	})
 
 	if err != nil {
@@ -124,6 +130,7 @@ func tagAccessibilityNodes(page *rod.Page, accessibilityTree []*proto.Accessibil
 		if bounds != nil {
 			page.MustEval(`(x, y, w, h, i) => {
 				const tag = document.createElement('div');
+				tag.className = 'agent-tag';
 				tag.innerText = i;
 				tag.style = `+"`"+`
 					position: fixed;
