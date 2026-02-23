@@ -78,10 +78,8 @@ func (b *BrowserFactory) OpenUrl(page *rod.Page, url string) *rod.Page {
 }
 
 func (b *BrowserFactory) OpenPageNewTab(browser *rod.Browser, url string) *rod.Page {
-	ctx := browser.MustIncognito()
-	page := stealth.MustPage(ctx).MustWindowFullscreen()
+	page := stealth.MustPage(browser).MustWindowFullscreen()
 	page.MustNavigate(url)
-	page.MustWaitStable()
 	return page
 }
 

@@ -330,7 +330,7 @@ func getPlannerResponseSchema() map[string]interface{} {
 				"description": "Brief explanation of the decision and next action",
 			},
 		},
-		"required": []string{"is_application_complete", "reasoning", "requires_user_action"},
+		"required": []string{"is_application_complete", "reasoning", "requires_user_action", "tool_call"},
 	}
 }
 

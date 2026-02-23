@@ -12,24 +12,32 @@ import (
 )
 
 type Activity struct {
-	browserFactory browserfactory.BrowserClient
-	activeSessions map[string]*rod.Page
-	mu             sync.Mutex
+	browserFactory    browserfactory.BrowserClient
+	activeSessions    map[string]*rod.Page
+	incognitoContexts map[string]*rod.Browser
+	mu                sync.Mutex
 }
 
 func NewActivities(browserFactory browserfactory.BrowserClient) *Activity {
 	return &Activity{
-		browserFactory: browserFactory,
-		activeSessions: make(map[string]*rod.Page),
+		browserFactory:    browserFactory,
+		activeSessions:    make(map[string]*rod.Page),
+		incognitoContexts: make(map[string]*rod.Browser),
 	}
 }
 
 func (a *Activity) OpenWebpage(ctx context.Context, input OpenWebpageInput) error {
-	page := a.browserFactory.OpenPageNewTab(a.browserFactory.GetBrowser(), input.Url)
-
 	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	incognitoCtx, exists := a.incognitoContexts[input.WorkflowID]
+	if !exists {
+		incognitoCtx = a.browserFactory.GetBrowser().MustIncognito()
+		a.incognitoContexts[input.WorkflowID] = incognitoCtx
+	}
+
+	page := a.browserFactory.OpenPageNewTab(incognitoCtx, input.Url)
 	a.activeSessions[input.WorkflowID] = page
-	a.mu.Unlock()
 
 	return nil
 }
@@ -214,25 +222,36 @@ func (a *Activity) Navigate(ctx context.Context, input NavigateInput) error {
 		return fmt.Errorf("failed to navigate to %s: %w", input.Url, err)
 	}
 
-	page.MustWaitStable()
+	page.MustWaitLoad()
 	return nil
 }
 
 func (a *Activity) ClosePage(ctx context.Context, input ClosePageInput) error {
 	a.mu.Lock()
-	page, exists := a.activeSessions[input.WorkflowID]
-	if exists {
+	defer a.mu.Unlock()
+
+	page, pageExists := a.activeSessions[input.WorkflowID]
+	incognitoCtx, ctxExists := a.incognitoContexts[input.WorkflowID]
+
+	if pageExists {
 		delete(a.activeSessions, input.WorkflowID)
 	}
-	a.mu.Unlock()
+	if ctxExists {
+		delete(a.incognitoContexts, input.WorkflowID)
+	}
 
-	if !exists {
+	if !pageExists {
 		return fmt.Errorf("no active page for workflow %s", input.WorkflowID)
 	}
 
-	err := page.Close()
-	if err != nil {
+	if err := page.Close(); err != nil {
 		return fmt.Errorf("failed to close page: %w", err)
+	}
+
+	if ctxExists {
+		if err := incognitoCtx.Close(); err != nil {
+			return fmt.Errorf("failed to close incognito context: %w", err)
+		}
 	}
 
 	return nil

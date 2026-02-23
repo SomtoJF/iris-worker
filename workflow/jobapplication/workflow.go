@@ -84,9 +84,10 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	}
 
 	defer func() {
-		workflow.ExecuteActivity(sessionCtx, "ClosePage", browser.ClosePageInput{
+		newCtx, _ := workflow.NewDisconnectedContext(sessionCtx)
+		workflow.ExecuteActivity(newCtx, "ClosePage", browser.ClosePageInput{
 			WorkflowID: workflowId,
-		}).Get(sessionCtx, nil)
+		}).Get(newCtx, nil)
 	}()
 
 	isApplicationComplete := false
