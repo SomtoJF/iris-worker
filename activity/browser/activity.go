@@ -102,7 +102,7 @@ func (a *Activity) Click(ctx context.Context, input ClickInput) error {
 		return fmt.Errorf("failed to click element: %w", err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(1000 * time.Millisecond)
 
 	pagesAfter := incognitoCtx.MustPages()
 	afterCount := len(pagesAfter)
@@ -278,4 +278,42 @@ func (a *Activity) ClosePage(ctx context.Context, input ClosePageInput) error {
 	}
 
 	return nil
+}
+
+type UploadFileInput struct {
+	WorkflowID   string `json:"workflow_id"`
+	FilePath     string `json:"file_path"`
+	ElementIndex int    `json:"element_index"`
+}
+
+func (a *Activity) UploadFile(ctx context.Context, input UploadFileInput) error {
+	a.mu.Lock()
+	page, exists := a.activeSessions[input.WorkflowID]
+	a.mu.Unlock()
+
+	if !exists {
+		return fmt.Errorf("no active page for workflow %s", input.WorkflowID)
+	}
+
+	_, taggedNodes, err := a.browserFactory.ScreenshotForLLM(page, "temp.png")
+	if err != nil {
+		return fmt.Errorf("failed to get tagged nodes: %w", err)
+	}
+
+	if input.ElementIndex < 0 || input.ElementIndex >= len(taggedNodes) {
+		return fmt.Errorf("element index %d out of range (0-%d)", input.ElementIndex, len(taggedNodes)-1)
+	}
+
+	element := taggedNodes[input.ElementIndex].Element
+	if element == nil {
+		return fmt.Errorf("element at index %d has no DOM element", input.ElementIndex)
+	}
+
+	err = element.SetFiles([]string{input.FilePath})
+	if err != nil {
+		return fmt.Errorf("failed to upload file: %w", err)
+	}
+
+	return nil
+
 }
