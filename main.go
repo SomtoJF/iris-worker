@@ -5,11 +5,11 @@ import (
 
 	"github.com/SomtoJF/iris-worker/activity/browser"
 	"github.com/SomtoJF/iris-worker/activity/llm"
+	s3Activities "github.com/SomtoJF/iris-worker/activity/s3"
 	sqldbActivities "github.com/SomtoJF/iris-worker/activity/sqldb"
 	"github.com/SomtoJF/iris-worker/activity/web"
 	"github.com/SomtoJF/iris-worker/common"
 	"github.com/SomtoJF/iris-worker/initializers/env"
-	"github.com/SomtoJF/iris-worker/initializers/sqldb"
 	"github.com/SomtoJF/iris-worker/workflow/jobapplication"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
@@ -22,12 +22,7 @@ const (
 )
 
 func init() {
-	err := sqldb.ConnectToSQLite()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	err = env.LoadEnvVariables()
+	err := env.LoadEnvVariables()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -69,17 +64,25 @@ func registerJobApplicationWorkflows(w worker.Worker) {
 }
 
 func registerJobApplicationActivities(w worker.Worker, dependencies common.Dependencies) {
-	sqldbActivities := sqldbActivities.NewActivities(sqldb.DB)
+	db := dependencies.GetDB()
+	s3Manager := dependencies.GetS3Manager()
+	aipiClient := dependencies.GetAIPIClient()
+	browserClient := dependencies.GetBrowserClient()
+
+	sqldbActivities := sqldbActivities.NewActivities(db)
 	w.RegisterActivity(sqldbActivities)
 
-	llmActivities := llm.NewActivity(dependencies.GetAIPIClient())
+	llmActivities := llm.NewActivity(aipiClient)
 	w.RegisterActivity(llmActivities)
 
-	browserActivities := browser.NewActivities(dependencies.GetBrowserClient())
+	browserActivities := browser.NewActivities(browserClient)
 	w.RegisterActivity(browserActivities)
 
 	webActivities := web.NewActivity()
 	w.RegisterActivity(webActivities)
+
+	s3Activity := s3Activities.NewActivity(s3Manager)
+	w.RegisterActivity(s3Activity)
 }
 
 func loadTemplates() {

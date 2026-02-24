@@ -8,11 +8,14 @@ import (
 	"github.com/SomtoJF/iris-worker/browserfactory"
 	"github.com/SomtoJF/iris-worker/initializers/fs"
 	"github.com/SomtoJF/iris-worker/initializers/s3"
+	"github.com/SomtoJF/iris-worker/initializers/sqldb"
 	s3pkg "github.com/SomtoJF/iris-worker/pkg/s3"
 	"github.com/revrost/go-openrouter"
+	"gorm.io/gorm"
 )
 
 type Dependencies interface {
+	GetDB() *gorm.DB
 	GetAIPIClient() *aipi.AIPIClient
 	GetBrowserClient() browserfactory.BrowserClient
 	GetS3Manager() *s3pkg.S3Manager
@@ -20,6 +23,7 @@ type Dependencies interface {
 }
 
 type dependencies struct {
+	db            *gorm.DB
 	aipiClient    *aipi.AIPIClient
 	browserClient browserfactory.BrowserClient
 	fs            *fs.TemporaryFileSystem
@@ -38,11 +42,20 @@ func (d *dependencies) GetS3Manager() *s3pkg.S3Manager {
 	return d.s3Manager
 }
 
+func (d *dependencies) GetDB() *gorm.DB {
+	return d.db
+}
+
 func (d *dependencies) Cleanup() {
 	d.fs.Cleanup()
 }
 
 func MakeDependencies() (Dependencies, error) {
+	db, err := sqldb.ConnectToSQLite()
+	if err != nil {
+		return nil, fmt.Errorf("sqldb: %w", err)
+	}
+
 	apiKey := os.Getenv("OPENROUTER_API_KEY")
 	if apiKey == "" {
 		return nil, fmt.Errorf("OPENROUTER_API_KEY environment variable is not set")
@@ -63,6 +76,7 @@ func MakeDependencies() (Dependencies, error) {
 	bucket := os.Getenv("AWS_BUCKET")
 	s3Manager := s3pkg.NewS3Manager(s3Client, bucket)
 	return &dependencies{
+		db:            db,
 		aipiClient:    aipi.NewAIPIClient(openrouterClient),
 		browserClient: browserClient,
 		fs:            fs,

@@ -60,6 +60,13 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		return err
 	}
 
+	resumePath, err := loadResumeIntoMemory(ctx, userResume.FileKey)
+	if err != nil {
+		logger.Error("Failed to download and load resume into memory", "error", err)
+		updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
+		return err
+	}
+
 	if err := openWebpage(sessionCtx, workflowId, input.Url); err != nil {
 		logger.Error("Failed to open webpage", "error", err)
 		updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
@@ -113,6 +120,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 			ToolCallHistory: toolCallHistory,
 			UserResume:      userResume.Content,
 			JobDescription:  jobDetails.JobDescription,
+			UserResumePath:  resumePath,
 		}
 
 		plannerResponse, err := planNextAction(ctx, plannerRequest)

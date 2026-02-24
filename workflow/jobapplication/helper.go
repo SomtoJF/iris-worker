@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"text/template"
 
+	s3activity "github.com/SomtoJF/iris-worker/activity/s3"
 	"github.com/SomtoJF/iris-worker/aipi/types"
 	"github.com/SomtoJF/iris-worker/browserfactory"
 	"github.com/SomtoJF/iris-worker/helper"
@@ -48,6 +50,7 @@ type PlannerRequest struct {
 	JobPostingUrl   string                                  `json:"job_posting_url"`
 	JobDescription  string                                  `json:"job_description"`
 	UserResume      string                                  `json:"user_resume"`
+	UserResumePath  string                                  `json:"user_resume_path"`
 	ScreenshotPath  string                                  `json:"screenshot_path"`
 	TaggedNodes     []browserfactory.SerializableTaggedNode `json:"tagged_nodes"`
 	ToolCallHistory []ToolCallResult                        `json:"tool_call_history"`
@@ -153,15 +156,6 @@ var toolRequestStructureMap = map[string]map[string]interface{}{
 		},
 		"required": []string{"url"},
 	},
-	"close_page": {
-		"type": "object",
-		"properties": map[string]interface{}{
-			"page_index": map[string]interface{}{
-				"type": "integer",
-			},
-		},
-		"required": []string{"page_index"},
-	},
 	"web_scrape": {
 		"type": "object",
 		"properties": map[string]interface{}{
@@ -186,6 +180,15 @@ var toolRequestStructureMap = map[string]map[string]interface{}{
 		},
 		"required": []string{"url", "advanced"},
 	},
+}
+
+func init() {
+	// Validate that all tools in schema map have corresponding activity mappings
+	for toolName := range toolRequestStructureMap {
+		if _, exists := toolActivityNameMap[toolName]; !exists {
+			panic(fmt.Sprintf("tool '%s' has schema but no activity mapping", toolName))
+		}
+	}
 }
 
 func SetTemplates() {
@@ -414,4 +417,18 @@ func getJobDetailsResponseSchema() map[string]interface{} {
 		},
 		"required": []string{"job_title", "company_name", "job_description"},
 	}
+}
+
+func loadResumeIntoMemory(ctx workflow.Context, fileKey string) (string, error) {
+	destPath := fmt.Sprintf("%s/%s", os.TempDir(), filepath.Base(fileKey))
+
+	var output s3activity.DownloadFileOutput
+	if err := workflow.ExecuteActivity(ctx, "DownloadFile", s3activity.DownloadFileInput{
+		Key:      fileKey,
+		DestPath: destPath,
+	}).Get(ctx, &output); err != nil {
+		return "", fmt.Errorf("failed to download resume from S3: %w", err)
+	}
+
+	return output.Path, nil
 }
