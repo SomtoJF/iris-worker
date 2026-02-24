@@ -53,6 +53,13 @@ The tagged_nodes array provides details about each tagged element:
         - url (string): The URL to scrape
         - advanced (boolean): Whether to use the advanced scraping tool
     </tool>
+
+    <tool name="upload_file">
+        **When to use**: To upload the user's resume to a file input element on the application form.
+        **Arguments**:
+        - element_index (integer): The tag number of the file input element
+        - file_path (string): The path to the file to upload (use the user_resume_path provided in the prompt)
+    </tool>
 </tools>
 
 <guidelines>

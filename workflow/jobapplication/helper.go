@@ -86,9 +86,9 @@ var toolActivityNameMap = map[string]ToolActivity{
 		ActivityName: "ScrapeWebPage",
 		Description:  "Scrape the web page for the given URL",
 	},
-	"retrieve_job_description": {
-		ActivityName: "ScrapeWebPage",
-		Description:  "Retrieve the job description using the url of the job description page",
+	"upload_file": {
+		ActivityName: "UploadFile",
+		Description:  "Upload a file (e.g., resume) to a file input element",
 	},
 }
 
@@ -168,17 +168,17 @@ var toolRequestStructureMap = map[string]map[string]interface{}{
 		},
 		"required": []string{"url", "advanced"},
 	},
-	"retrieve_job_description": {
+	"upload_file": {
 		"type": "object",
 		"properties": map[string]interface{}{
-			"url": map[string]interface{}{
+			"element_index": map[string]interface{}{
+				"type": "integer",
+			},
+			"file_path": map[string]interface{}{
 				"type": "string",
 			},
-			"advanced": map[string]interface{}{
-				"type": "boolean",
-			},
 		},
-		"required": []string{"url", "advanced"},
+		"required": []string{"element_index", "file_path"},
 	},
 }
 
