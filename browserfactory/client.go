@@ -51,9 +51,14 @@ func (b *BrowserFactory) ScreenshotForLLM(page *rod.Page, fileName string) (stri
 	screenshotPath := b.fs.ConcatenatePath(fileName)
 
 	var taggedNodes []*TaggedAccessibilityNode
+	var fileInputStorageKey string
 
 	err := rod.Try(func() {
 		page.MustWaitLoad()
+
+		// Make hidden file inputs visible before tagging
+		fileInputStorageKey = makeFileInputsVisible(page)
+
 		// Get the accessibility tree for the page
 		accessibilityTree, _ := getPageAccessibilityTree(page)
 
@@ -69,6 +74,9 @@ func (b *BrowserFactory) ScreenshotForLLM(page *rod.Page, fileName string) (stri
 			document.getElementById('agent-grid')?.remove();
 			document.querySelectorAll('.agent-tag').forEach(el => el.remove());
 		}`)
+
+		// Restore original file input styles
+		restoreFileInputStyles(page, fileInputStorageKey)
 
 	})
 
@@ -113,6 +121,165 @@ func drawTransparentGrid(page *rod.Page) {
 	}`)
 }
 
+// makeFileInputsVisible unhides all file inputs and returns data to restore them later
+func makeFileInputsVisible(page *rod.Page) string {
+	storageKey, _ := page.Eval(`() => {
+		const inputs = document.querySelectorAll('input[type="file"]');
+		const storage = [];
+
+		inputs.forEach((input, index) => {
+			// Store original styles
+			const original = {
+				display: input.style.display,
+				visibility: input.style.visibility,
+				opacity: input.style.opacity,
+				position: input.style.position,
+				width: input.style.width,
+				height: input.style.height
+			};
+			storage.push(original);
+
+			// Make visible at original location
+			input.style.display = 'block';
+			input.style.visibility = 'visible';
+			input.style.opacity = '1';
+			input.style.minWidth = '100px';
+			input.style.minHeight = '20px';
+
+			// Mark with data attribute for later identification
+			input.dataset.fileInputIndex = index;
+		});
+
+		// Store in window for later restoration
+		const storageKey = 'fileInputStyles_' + Date.now();
+		window[storageKey] = storage;
+		return storageKey;
+	}`)
+
+	if storageKey != nil {
+		return storageKey.Value.String()
+	}
+	return ""
+}
+
+// restoreFileInputStyles restores original styles of file inputs
+func restoreFileInputStyles(page *rod.Page, storageKey string) {
+	if storageKey == "" {
+		return
+	}
+
+	page.Eval(`(storageKey) => {
+		const inputs = document.querySelectorAll('input[type="file"]');
+		const storage = window[storageKey];
+
+		if (storage) {
+			inputs.forEach((input, index) => {
+				if (storage[index]) {
+					// Restore original styles
+					const original = storage[index];
+					input.style.display = original.display;
+					input.style.visibility = original.visibility;
+					input.style.opacity = original.opacity;
+					input.style.position = original.position;
+					input.style.width = original.width;
+					input.style.height = original.height;
+
+					// Remove marker
+					delete input.dataset.fileInputIndex;
+				}
+			});
+
+			// Clean up storage
+			delete window[storageKey];
+		}
+	}`, storageKey)
+}
+
+// extractFileInputMetadata extracts rich metadata for a file input element
+func extractFileInputMetadata(element *rod.Element) map[string]string {
+	if element == nil {
+		return nil
+	}
+
+	metadata := make(map[string]string)
+
+	// Get basic attributes
+	if id, _ := element.Attribute("id"); id != nil {
+		metadata["id"] = *id
+	}
+	if name, _ := element.Attribute("name"); name != nil {
+		metadata["name"] = *name
+	}
+	if inputType, _ := element.Attribute("type"); inputType != nil {
+		metadata["type"] = *inputType
+	}
+	if accept, _ := element.Attribute("accept"); accept != nil {
+		metadata["accept"] = *accept
+	}
+	if placeholder, _ := element.Attribute("placeholder"); placeholder != nil {
+		metadata["placeholder"] = *placeholder
+	}
+	if ariaLabel, _ := element.Attribute("aria-label"); ariaLabel != nil {
+		metadata["aria-label"] = *ariaLabel
+	}
+
+	// Try to find associated label
+	labelText, _ := element.Eval(`(el) => {
+		// Check for label with 'for' attribute
+		if (el.id) {
+			const label = document.querySelector('label[for="' + el.id + '"]');
+			if (label) return label.innerText.trim();
+		}
+
+		// Check if input is inside a label
+		const parentLabel = el.closest('label');
+		if (parentLabel) return parentLabel.innerText.trim();
+
+		// Look for nearby text within container
+		const container = el.closest('div, section, fieldset, td, li');
+		if (container) {
+			// Get text nodes near the input
+			const walker = document.createTreeWalker(
+				container,
+				NodeFilter.SHOW_TEXT,
+				null,
+				false
+			);
+
+			let nearbyText = [];
+			let node;
+			while(node = walker.nextNode()) {
+				const text = node.textContent.trim();
+				if (text && text.length > 2 && text.length < 100) {
+					nearbyText.push(text);
+				}
+			}
+
+			// Prioritize text containing common file upload keywords
+			const keywords = ['resume', 'cv', 'cover', 'letter', 'upload', 'file', 'document', 'attach'];
+			for (let text of nearbyText) {
+				const lowerText = text.toLowerCase();
+				for (let keyword of keywords) {
+					if (lowerText.includes(keyword)) {
+						return text;
+					}
+				}
+			}
+
+			// Return first meaningful text if no keywords found
+			if (nearbyText.length > 0) return nearbyText[0];
+		}
+
+		return '';
+	}`)
+
+	if labelText != nil && labelText.Value.String() != "" {
+		metadata["label"] = labelText.Value.String()
+	}
+
+	return metadata
+}
+
 func tagAccessibilityNodes(page *rod.Page, accessibilityTree []*proto.AccessibilityAXNode) []*TaggedAccessibilityNode {
 	// Filter for focusable nodes with valid BackendDOMNodeID
 	var focusableNodes []*proto.AccessibilityAXNode
@@ -152,7 +319,7 @@ func tagAccessibilityNodes(page *rod.Page, accessibilityTree []*proto.Accessibil
 		}
 
 		element := getElementFromNode(page, node)
-		description := getDescriptionFromNode(node, i)
+		description := getDescriptionFromNode(node, i, element)
 
 		taggedNodes = append(taggedNodes, &TaggedAccessibilityNode{
 			Node:        node,
@@ -166,7 +333,7 @@ func tagAccessibilityNodes(page *rod.Page, accessibilityTree []*proto.Accessibil
 	return taggedNodes
 }
 
-func getDescriptionFromNode(node *proto.AccessibilityAXNode, index int) string {
+func getDescriptionFromNode(node *proto.AccessibilityAXNode, index int, element *rod.Element) string {
 	name := ""
 	if node.Name != nil && !node.Name.Value.Nil() {
 		name = node.Name.Value.String()
@@ -180,6 +347,53 @@ func getDescriptionFromNode(node *proto.AccessibilityAXNode, index int) string {
 		value = v.Value.String()
 	}
 
+	// Check if this is a file input and add rich metadata
+	if element != nil && (role == "input" || strings.Contains(strings.ToLower(role), "file")) {
+		inputType, _ := element.Attribute("type")
+		if inputType != nil && *inputType == "file" {
+			metadata := extractFileInputMetadata(element)
+
+			// Build enhanced description for file input
+			desc := fmt.Sprintf("Tag %d: ", index)
+
+			// Add label if found
+			if label, ok := metadata["label"]; ok && label != "" {
+				desc += fmt.Sprintf("%s ", label)
+			} else if name != "" {
+				desc += fmt.Sprintf("%s ", name)
+			}
+
+			desc += "input[type=file]"
+
+			// Add ID if present
+			if id, ok := metadata["id"]; ok && id != "" {
+				desc += fmt.Sprintf(" (id: %s", id)
+			} else {
+				desc += " ("
+			}
+
+			// Add accept attribute if present
+			if accept, ok := metadata["accept"]; ok && accept != "" {
+				if strings.Contains(desc, "(id:") {
+					desc += fmt.Sprintf(", accepts: %s", accept)
+				} else {
+					desc += fmt.Sprintf("accepts: %s", accept)
+				}
+			}
+
+			// Add aria-label if different from label
+			if ariaLabel, ok := metadata["aria-label"]; ok && ariaLabel != "" {
+				if label, hasLabel := metadata["label"]; !hasLabel || label != ariaLabel {
+					desc += fmt.Sprintf(", aria-label: '%s'", ariaLabel)
+				}
+			}
+
+			desc += ")"
+			return desc
+		}
+	}
+
+	// Default description for non-file inputs
 	desc := fmt.Sprintf("Tag %d: %s %s", index, name, role)
 	if value != "" {
 		desc += fmt.Sprintf(" with value %s", value)

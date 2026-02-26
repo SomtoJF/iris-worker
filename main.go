@@ -11,6 +11,7 @@ import (
 	"github.com/SomtoJF/iris-worker/common"
 	"github.com/SomtoJF/iris-worker/initializers/env"
 	"github.com/SomtoJF/iris-worker/workflow/jobapplication"
+	"github.com/SomtoJF/iris-worker/workflow/processresume"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 )
@@ -61,6 +62,7 @@ func main() {
 
 func registerJobApplicationWorkflows(w worker.Worker) {
 	w.RegisterWorkflow(jobapplication.JobApplicationWorkflow)
+	w.RegisterWorkflow(processresume.ProcessResumeWorkflow)
 }
 
 func registerJobApplicationActivities(w worker.Worker, dependencies common.Dependencies) {
