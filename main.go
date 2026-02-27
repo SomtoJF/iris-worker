@@ -5,6 +5,7 @@ import (
 
 	"github.com/SomtoJF/iris-worker/activity/browser"
 	"github.com/SomtoJF/iris-worker/activity/llm"
+	"github.com/SomtoJF/iris-worker/activity/realtimeevent"
 	s3Activities "github.com/SomtoJF/iris-worker/activity/s3"
 	sqldbActivities "github.com/SomtoJF/iris-worker/activity/sqldb"
 	"github.com/SomtoJF/iris-worker/activity/web"
@@ -85,6 +86,9 @@ func registerJobApplicationActivities(w worker.Worker, dependencies common.Depen
 
 	s3Activity := s3Activities.NewActivity(s3Manager)
 	w.RegisterActivity(s3Activity)
+
+	realtimeEventActivities := realtimeevent.NewActivities()
+	w.RegisterActivity(realtimeEventActivities)
 }
 
 func loadTemplates() {

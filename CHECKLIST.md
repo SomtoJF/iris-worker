@@ -3,9 +3,9 @@
 - [ x ] Implement user auth backend
 - [ x ] Implement user auth frontend
 - [ x ] Implement resume upload
-- [ ] Implement File Upload tool
+- [ x ] Implement File Upload tool
 - [ ] Implement Cover Letter tool
-- [ ] Collect more information from the user (onboarding) -- Need:
+- [ x ] Collect more information from the user (onboarding) -- Need:
   - Phone Number
   - Gender
   - Race
