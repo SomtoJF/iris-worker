@@ -25,6 +25,10 @@ func NewActivities() *Activities {
 	}
 }
 
+func getUserChannel(userID uint) string {
+	return fmt.Sprintf("user:%d:events", userID)
+}
+
 func (a *Activities) PublishRedisEvent(ctx context.Context, userID uint, eventType string, data interface{}) error {
 	eventData := map[string]interface{}{
 		"action": eventType,
@@ -36,7 +40,7 @@ func (a *Activities) PublishRedisEvent(ctx context.Context, userID uint, eventTy
 		return fmt.Errorf("failed to marshal event data: %w", err)
 	}
 
-	channelName := fmt.Sprintf("user:%d:events", userID)
+	channelName := getUserChannel(userID)
 
 	_, err = a.redisClient.Publish(ctx, channelName, message).Result()
 	if err != nil {
