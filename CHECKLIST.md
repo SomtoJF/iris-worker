@@ -15,7 +15,7 @@
   - Linkedin
   - Country of Residence
   - Citizenships
-- [ ] Wire in Redis Pub/Sub to worker repo
+- [ x ] Wire in Redis Pub/Sub to worker repo
 - [ ] Figure out captcha avoidance
 - [ ] Research the best and cheapest google job search tool
 - [ ] Implement job search

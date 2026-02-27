@@ -19,9 +19,10 @@ const (
 )
 
 type JobApplicationWorkflowInput struct {
-	IdJobApplication uint   `json:"id_job_application"`
-	Url              string `json:"url"`
-	IdUser           uint   `json:"id_user"`
+	IdJobApplication      uint   `json:"id_job_application"`
+	ApplicationExternalId string `json:"application_external_id"`
+	Url                   string `json:"url"`
+	IdUser                uint   `json:"id_user"`
 }
 
 func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowInput) error {
@@ -136,7 +137,17 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		}
 
 		if plannerResponse.RequiresUserAction {
-			err = awaitUserAction(ctx, workflowId, UserAction(plannerResponse.UserAction))
+			if err := updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusBlocked); err != nil {
+				logger.Error("Failed to update job application status", "error", err)
+			}
+			err = awaitUserAction(ctx, AwaitUserActionInput{
+				WorkflowId:            workflowId,
+				UserAction:            UserAction(plannerResponse.UserAction),
+				CompanyName:           jobDetails.CompanyName,
+				JobTitle:              jobDetails.JobTitle,
+				IdUser:                input.IdUser,
+				ApplicationExternalId: input.ApplicationExternalId,
+			})
 			if err != nil {
 				logger.Error("Failed to await user action", "error", err)
 				updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
@@ -195,20 +206,28 @@ type NotifyHumanActivityInput struct {
 	WorkflowID string `json:"workflow_id"`
 }
 
-func awaitUserAction(ctx workflow.Context, workflowID string, userAction UserAction) error {
-	signalChan := workflow.GetSignalChannel(ctx, string(userAction))
+type AwaitUserActionInput struct {
+	WorkflowId            string
+	UserAction            UserAction
+	CompanyName           string
+	JobTitle              string
+	IdUser                uint
+	ApplicationExternalId string
+}
+
+func awaitUserAction(ctx workflow.Context, input AwaitUserActionInput) error {
+	signalChan := workflow.GetSignalChannel(ctx, string(input.UserAction))
 
 	notificationMessage := ""
-	switch userAction {
+	switch input.UserAction {
 	case UserActionCaptcha:
-		notificationMessage = "Need help with CAPTCHA"
+		notificationMessage = fmt.Sprintf("Your application for %s at %s is blocked on a CAPTCHA. Please help with the CAPTCHA.", input.JobTitle, input.CompanyName)
 	case UserActionAuthentication:
-		notificationMessage = "Need help with authentication"
+		notificationMessage = fmt.Sprintf("Your application for %s at %s is blocked on a login screen. Please help with the authentication.", input.JobTitle, input.CompanyName)
 	}
 
 	// Tell the UI/Human that we are blocked
-	// TODO: Implement this function
-	err := sendUserNotification(ctx, workflowID, notificationMessage)
+	err := sendUserNotification(ctx, input.IdUser, input.WorkflowId, input.ApplicationExternalId, notificationMessage)
 	if err != nil {
 		return err
 	}
@@ -229,7 +248,7 @@ func awaitUserAction(ctx workflow.Context, workflowID string, userAction UserAct
 	selector.Select(ctx)
 
 	if !signalReceived {
-		return fmt.Errorf("timeout waiting for user action %s after 5 minutes", userAction)
+		return fmt.Errorf("timeout waiting for user action %s after 5 minutes", input.UserAction)
 	}
 	return nil
 }

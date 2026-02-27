@@ -347,10 +347,12 @@ func getBase64Screenshot(screenshotPath string) (string, error) {
 	return fmt.Sprintf("data:image/jpeg;base64,%s", base64Screenshot), nil
 }
 
-func sendUserNotification(ctx workflow.Context, workflowID string, message string) error {
-	// TODO: Implement this function
-	// Should send notification through redis pub/sub to the backend. Frontend should connect to realtime endpoint through SSE and listen for notifications.
-	return nil
+func sendUserNotification(ctx workflow.Context, userID uint, workflowID string, applicationId string, message string) error {
+	return workflow.ExecuteActivity(ctx, "PublishRedisEvent", userID, "USER_NOTIFICATION", map[string]interface{}{
+		"message":        message,
+		"workflow_id":    workflowID,
+		"application_id": applicationId,
+	}).Get(ctx, nil)
 }
 
 type JobDetails struct {
