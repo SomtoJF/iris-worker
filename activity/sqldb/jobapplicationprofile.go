@@ -44,3 +44,11 @@ func (a *Activity) UpdateJobApplicationProfile(ctx context.Context, input Update
 	}
 	return nil
 }
+
+func (a *Activity) FetchJobApplicationProfile(ctx context.Context, idUser uint) (JobApplicationProfile, error) {
+	var jobApplicationProfile JobApplicationProfile
+	if err := a.db.Model(&JobApplicationProfile{}).Where("id_user = ?", idUser).First(&jobApplicationProfile).Error; err != nil {
+		return JobApplicationProfile{}, err
+	}
+	return jobApplicationProfile, nil
+}

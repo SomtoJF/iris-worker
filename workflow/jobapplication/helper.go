@@ -54,6 +54,7 @@ type PlannerRequest struct {
 	ScreenshotPath  string                                  `json:"screenshot_path"`
 	TaggedNodes     []browserfactory.SerializableTaggedNode `json:"tagged_nodes"`
 	ToolCallHistory []ToolCallResult                        `json:"tool_call_history"`
+	UserProfile     UserProfile                             `json:"user_profile"`
 }
 
 type ToolActivity struct {

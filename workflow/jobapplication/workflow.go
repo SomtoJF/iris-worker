@@ -61,6 +61,13 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		return err
 	}
 
+	userProfile, err := fetchJobApplicationProfile(ctx, input.IdUser)
+	if err != nil {
+		logger.Error("Failed to fetch user profile", "error", err)
+		updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
+		return err
+	}
+
 	resumePath, err := loadResumeIntoMemory(ctx, userResume.FileKey)
 	if err != nil {
 		logger.Error("Failed to download and load resume into memory", "error", err)
@@ -122,6 +129,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 			UserResume:      userResume.Content,
 			JobDescription:  jobDetails.JobDescription,
 			UserResumePath:  resumePath,
+			UserProfile:     userProfile,
 		}
 
 		plannerResponse, err := planNextAction(ctx, plannerRequest)
@@ -259,4 +267,45 @@ func fetchUserResume(ctx workflow.Context, idUser uint) (sqldb.Resume, error) {
 		return sqldb.Resume{}, err
 	}
 	return resume, nil
+}
+
+type UserProfile struct {
+	FirstName              string   `json:"first_name"`
+	LastName               string   `json:"last_name"`
+	Email                  string   `json:"email"`
+	Phone                  string   `json:"phone"`
+	Address                string   `json:"address"`
+	City                   string   `json:"city"`
+	State                  string   `json:"state"`
+	Zip                    string   `json:"zip"`
+	CountryOfResidence     string   `json:"country_of_residence"`
+	IsVeteran              bool     `json:"is_veteran"`
+	CountriesOfCitizenship []string `json:"countries_of_citizenship"`
+	Gender                 string   `json:"gender"`
+	DateOfBirth            string   `json:"date_of_birth"`
+	Age                    int      `json:"age"`
+}
+
+func fetchJobApplicationProfile(ctx workflow.Context, idUser uint) (UserProfile, error) {
+	var jobApplicationProfile sqldb.JobApplicationProfile
+	if err := workflow.ExecuteActivity(ctx, "FetchJobApplicationProfile", idUser).Get(ctx, &jobApplicationProfile); err != nil {
+		return UserProfile{}, err
+	}
+	age := time.Now().Year() - jobApplicationProfile.DateOfBirth.Year()
+	return UserProfile{
+		FirstName:              jobApplicationProfile.FirstName,
+		LastName:               jobApplicationProfile.LastName,
+		Email:                  jobApplicationProfile.Email,
+		Phone:                  jobApplicationProfile.Phone,
+		Address:                jobApplicationProfile.Address,
+		City:                   jobApplicationProfile.City,
+		State:                  jobApplicationProfile.State,
+		Zip:                    jobApplicationProfile.Zip,
+		CountryOfResidence:     jobApplicationProfile.CountryOfResidence,
+		IsVeteran:              jobApplicationProfile.IsVeteran,
+		CountriesOfCitizenship: jobApplicationProfile.CountriesOfCitizenship,
+		Gender:                 jobApplicationProfile.Gender,
+		DateOfBirth:            jobApplicationProfile.DateOfBirth.Format("2006-01-02"),
+		Age:                    age,
+	}, nil
 }

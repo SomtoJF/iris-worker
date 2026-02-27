@@ -2,16 +2,22 @@
 Apply to the job posting at: {{.JobPostingUrl}}
 </task>
 
-<user_resume>
-{{.UserResume}}
-</user_resume>
+<candidate>
+   <candidate_profile>
+   {{.UserProfile}}
+   </candidate_profile>
 
-<user_resume_path>
-This is the location of the user's resume on the file system:
-   <path>
-      {{.UserResumePath}}
-   </path>
-</user_resume_path>
+   <candidate_resume>
+   {{.UserResume}}
+   </candidate_resume>
+
+   <candidate_resume_path>
+   This is the location of the candidate's resume on the file system:
+      <path>
+         {{.UserResumePath}}
+      </path>
+   </candidate_resume_path>
+</candidate>
 
 <job_description>
 {{.JobDescription}}
