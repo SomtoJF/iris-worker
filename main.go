@@ -11,6 +11,7 @@ import (
 	"github.com/SomtoJF/iris-worker/activity/web"
 	"github.com/SomtoJF/iris-worker/common"
 	"github.com/SomtoJF/iris-worker/initializers/env"
+	"github.com/SomtoJF/iris-worker/workflow/coverletter"
 	"github.com/SomtoJF/iris-worker/workflow/jobapplication"
 	"github.com/SomtoJF/iris-worker/workflow/processresume"
 	"go.temporal.io/sdk/client"
@@ -64,6 +65,7 @@ func main() {
 func registerJobApplicationWorkflows(w worker.Worker) {
 	w.RegisterWorkflow(jobapplication.JobApplicationWorkflow)
 	w.RegisterWorkflow(processresume.ProcessResumeWorkflow)
+	w.RegisterWorkflow(coverletter.CoverLetterWorkflow)
 }
 
 func registerJobApplicationActivities(w worker.Worker, dependencies common.Dependencies) {
@@ -93,4 +95,5 @@ func registerJobApplicationActivities(w worker.Worker, dependencies common.Depen
 
 func loadTemplates() {
 	jobapplication.SetTemplates()
+	coverletter.SetTemplates()
 }

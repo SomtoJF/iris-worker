@@ -37,6 +37,9 @@ type JobApplication struct {
 	IdExternal       uuid.UUID            `gorm:"type:text;not null;unique" json:"id"`
 	Status           JobApplicationStatus `gorm:"type:varchar(50);not null"`
 	Url              string               `gorm:"not null;unique"`
+	JobTitle         string               `gorm:"column:job_title" json:"job_title"`
+	CompanyName      string               `gorm:"column:company_name" json:"company_name"`
+	JobDescription   string               `gorm:"column:job_description" json:"job_description"`
 	CreatedAt        time.Time            `gorm:"default:CURRENT_TIMESTAMP"`
 	UpdatedAt        time.Time            `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime"`
 	DeletedAt        *time.Time           `gorm:"index;default:NULL"`
@@ -51,4 +54,12 @@ func (a *Activity) UpdateJobApplication(ctx context.Context, input UpdateJobAppl
 		return err
 	}
 	return nil
+}
+
+func (a *Activity) GetJobApplication(ctx context.Context, idJobApplication uint) (JobApplication, error) {
+	var jobApplication JobApplication
+	if err := a.db.Model(&JobApplication{}).Where("id_job_application = ?", idJobApplication).First(&jobApplication).Error; err != nil {
+		return JobApplication{}, err
+	}
+	return jobApplication, nil
 }

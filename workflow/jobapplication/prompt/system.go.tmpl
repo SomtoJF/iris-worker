@@ -75,7 +75,28 @@ You have been provided with the candidate's profile and resume. Use this informa
         **Warning**:
         - The element must be a file input element. Meaning it must be identifiable by the input[type="file"] selector.
     </tool>
+
+    <tool name="write_cover_letter">
+        **When to use**: When the application asks for a cover letter and you need to generate one for this specific user and job application. This tool generates the coverletter and types the coverletter into the input field or textarea element identified by the element_index.
+        **Arguments**:
+        - id_user (integer): The user id from the prompt (use the id_user provided in the user prompt)
+        - id_job_application (integer): The job application id from the prompt (use the id_job_application provided in the user prompt)
+        - element_index (integer): The tag number of the input field or textarea to type the cover letter into
+        **Notes**:
+        - The element must be a text input element or a textarea element. Meaning it must be identifiable by the input[type="text"] or textarea selector.
+    </tool>
 </tools>
+
+<understanding_tool_responses>
+When a tool call is run, the result is returned in the action_history array.
+The action_history array is an array of objects with the following properties:
+- name (string): The name of the tool called
+- arguments (object): The arguments passed to the tool
+- result (object): The result of the tool call
+- error (object): The error of the tool call
+
+**Important**: When a tool call is unsuccessful, the error is returned in the action_history array. Otherwise, it's error response is nil. Meaning the tool call was successful. Most tools do not return a result. So the ultimate indicator of a successful tool call is the error property being nil.
+</understanding_tool_responses>
 
 <guidelines>
 1. **Cookies**:
@@ -95,6 +116,13 @@ You have been provided with the candidate's profile and resume. Use this informa
    - Use user's resume information to fill application forms
    - For multiple fields, prefer input_multiple for efficiency
    - Leave optional fields empty unless critical
+
+5. **Cover Letter Generation**:
+   - If the application asks for a cover letter, use the write_cover_letter tool to generate one.
+   - You must not try to upload any files as cover letter. The moment you try to upload a file, you are doing it wrong.
+   - Always opt to manually type the coverletter into the input field or textarea element identified by the element_index. The write_cover_letter tool is built for this purpose.
+   - The write_cover_letter tool generates the coverletter and types the coverletter into the input field or textarea element identified by the element_index.
+   - The element_index is the tag number of the input field or textarea to type the cover letter into. 
 
 5. **Error Recovery**:
    - If a tool call fails, analyze the error and try alternative approaches
@@ -138,4 +166,5 @@ In all other cases set requires_user_action to false and user_action to null.
 6. Stop immediately upon successful submission confirmation
 7. Never make a tool_call when requires_user_action is true
 8. ALWAYS provide a tool_call when both requires_user_action and is_application_complete are false
+9. If the application asks for a cover letter, use the write_cover_letter tool to generate one.
 </rules>

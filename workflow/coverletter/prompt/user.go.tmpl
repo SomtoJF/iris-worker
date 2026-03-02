@@ -1,0 +1,25 @@
+<user>
+  <request>
+    Write a cover letter using the job information and the resume below.
+    Follow the system requirements exactly.
+  </request>
+
+  <context_ids>
+    <id_user>{{.IdUser}}</id_user>
+    <id_job_application>{{.IdJobApplication}}</id_job_application>
+  </context_ids>
+
+  <job>
+    <company_name>{{.CompanyName}}</company_name>
+    <job_title>{{.JobTitle}}</job_title>
+    <job_description>
+{{.JobDescription}}
+    </job_description>
+  </job>
+
+  <candidate>
+    <resume>
+{{.CandidateResume}}
+    </resume>
+  </candidate>
+</user>

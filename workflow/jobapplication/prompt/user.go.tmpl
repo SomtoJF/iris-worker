@@ -2,6 +2,11 @@
 Apply to the job posting at: {{.JobPostingUrl}}
 </task>
 
+<context_ids>
+  <id_user>{{.IdUser}}</id_user>
+  <id_job_application>{{.IdJobApplication}}</id_job_application>
+</context_ids>
+
 <candidate>
    <candidate_profile>
    {{.UserProfile}}
@@ -37,7 +42,8 @@ Apply to the job posting at: {{.JobPostingUrl}}
 {{range $i, $call := .ToolCallHistory}}
 {{add $i 1}}. Tool: {{$call.Name}}
    Arguments: {{json $call.Arguments}}
-   {{if $call.Error}}Error: {{$call.Error}}{{else if $call.Result}}Result: Success{{end}}
+   Error: {{if $call.Error}}{{$call.Error}}{{else}}nil{{end}}
+   {{if $call.Result}}Result: {{json $call.Result}}{{end}}
 {{end}}{{else}}No actions taken yet. This is the first interaction.{{end}}
 </action_history>
 

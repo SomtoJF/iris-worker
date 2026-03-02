@@ -35,7 +35,7 @@ type ToolCall struct {
 type ToolCallResult struct {
 	ToolCall
 	Result map[string]interface{} `json:"result,omitempty"`
-	Error  string                 `json:"error,omitempty"`
+	Error  error                  `json:"error,omitempty"`
 }
 
 type PlannerResponse struct {
@@ -47,49 +47,57 @@ type PlannerResponse struct {
 }
 
 type PlannerRequest struct {
-	JobPostingUrl   string                                  `json:"job_posting_url"`
-	JobDescription  string                                  `json:"job_description"`
-	UserResume      string                                  `json:"user_resume"`
-	UserResumePath  string                                  `json:"user_resume_path"`
-	ScreenshotPath  string                                  `json:"screenshot_path"`
-	TaggedNodes     []browserfactory.SerializableTaggedNode `json:"tagged_nodes"`
-	ToolCallHistory []ToolCallResult                        `json:"tool_call_history"`
-	UserProfile     UserProfile                             `json:"user_profile"`
+	IdUser           uint                                    `json:"id_user"`
+	IdJobApplication uint                                    `json:"id_job_application"`
+	JobPostingUrl    string                                  `json:"job_posting_url"`
+	JobDescription   string                                  `json:"job_description"`
+	UserResume       string                                  `json:"user_resume"`
+	UserResumePath   string                                  `json:"user_resume_path"`
+	ScreenshotPath   string                                  `json:"screenshot_path"`
+	TaggedNodes      []browserfactory.SerializableTaggedNode `json:"tagged_nodes"`
+	ToolCallHistory  []ToolCallResult                        `json:"tool_call_history"`
+	UserProfile      UserProfile                             `json:"user_profile"`
 }
 
-type ToolActivity struct {
-	ActivityName string
-	Description  string
+type ToolItem struct {
+	TemporalString string
+	Description    string
+	IsWorkflow     bool
 }
 
-var toolActivityNameMap = map[string]ToolActivity{
+var toolItemMap = map[string]ToolItem{
 	"click": {
-		ActivityName: "Click",
-		Description:  "Click on an element identified by its index",
+		TemporalString: "Click",
+		Description:    "Click on an element identified by its index",
 	},
 	"input_text": {
-		ActivityName: "Type",
-		Description:  "Type text into an input element identified by its index",
+		TemporalString: "Type",
+		Description:    "Type text into an input element identified by its index",
 	},
 	"input_multiple": {
-		ActivityName: "TypeMultiple",
-		Description:  "Type text into multiple input elements in sequence",
+		TemporalString: "TypeMultiple",
+		Description:    "Type text into multiple input elements in sequence",
 	},
 	"scroll": {
-		ActivityName: "Scroll",
-		Description:  "Scroll the page in a specified direction by a given ratio",
+		TemporalString: "Scroll",
+		Description:    "Scroll the page in a specified direction by a given ratio",
 	},
 	"navigate": {
-		ActivityName: "Navigate",
-		Description:  "Navigate to a new URL",
+		TemporalString: "Navigate",
+		Description:    "Navigate to a new URL",
 	},
 	"web_scrape": {
-		ActivityName: "ScrapeWebPage",
-		Description:  "Scrape the web page for the given URL",
+		TemporalString: "ScrapeWebPage",
+		Description:    "Scrape the web page for the given URL",
 	},
 	"upload_file": {
-		ActivityName: "UploadFile",
-		Description:  "Upload a file (e.g., resume) to a file input element",
+		TemporalString: "UploadFile",
+		Description:    "Upload a file (e.g., resume) to a file input element",
+	},
+	"write_cover_letter": {
+		TemporalString: "CoverLetterWorkflow",
+		Description:    "Generate a cover letter for the current job application",
+		IsWorkflow:     true,
 	},
 }
 
@@ -181,12 +189,27 @@ var toolRequestStructureMap = map[string]map[string]interface{}{
 		},
 		"required": []string{"element_index", "file_path"},
 	},
+	"write_cover_letter": {
+		"type": "object",
+		"properties": map[string]interface{}{
+			"id_user": map[string]interface{}{
+				"type": "integer",
+			},
+			"id_job_application": map[string]interface{}{
+				"type": "integer",
+			},
+			"element_index": map[string]interface{}{
+				"type": "integer",
+			},
+		},
+		"required": []string{"id_user", "id_job_application", "element_index"},
+	},
 }
 
 func init() {
 	// Validate that all tools in schema map have corresponding activity mappings
 	for toolName := range toolRequestStructureMap {
-		if _, exists := toolActivityNameMap[toolName]; !exists {
+		if _, exists := toolItemMap[toolName]; !exists {
 			panic(fmt.Sprintf("tool '%s' has schema but no activity mapping", toolName))
 		}
 	}
@@ -256,22 +279,26 @@ func planNextAction(ctx workflow.Context, input PlannerRequest) (PlannerResponse
 }
 
 func executeToolCall(ctx workflow.Context, workflowID string, toolCall ToolCall) ToolCallResult {
-	toolActivity, exists := toolActivityNameMap[toolCall.Name]
+	toolItem, exists := toolItemMap[toolCall.Name]
 	if !exists {
 		return ToolCallResult{
 			ToolCall: toolCall,
-			Error:    fmt.Sprintf("unknown tool: %s", toolCall.Name),
+			Error:    fmt.Errorf("unknown tool: %s", toolCall.Name),
 		}
 	}
 
 	toolCall.Arguments["workflow_id"] = workflowID
-
 	resp := make(map[string]interface{})
-	err := workflow.ExecuteActivity(ctx, toolActivity.ActivityName, toolCall.Arguments).Get(ctx, resp)
+	var err error
+	if toolItem.IsWorkflow {
+		err = workflow.ExecuteChildWorkflow(ctx, toolItem.TemporalString, toolCall.Arguments).Get(ctx, resp)
+	} else {
+		err = workflow.ExecuteActivity(ctx, toolItem.TemporalString, toolCall.Arguments).Get(ctx, resp)
+	}
 	if err != nil {
 		return ToolCallResult{
 			ToolCall: toolCall,
-			Error:    err.Error(),
+			Error:    err,
 		}
 	}
 
