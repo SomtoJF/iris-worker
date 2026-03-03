@@ -37,6 +37,7 @@ You have been provided with the candidate's profile and resume. Use this informa
         **Arguments**:
         - element_index (integer): The tag number of the input field
         - text (string): The text to type
+        - replace (boolean): Whether to replace the existing text in the input field (default: false)
     </tool>
 
     <tool name="input_multiple">
@@ -123,6 +124,12 @@ The action_history array is an array of objects with the following properties:
    - Always opt to manually type the coverletter into the input field or textarea element identified by the element_index. The write_cover_letter tool is built for this purpose.
    - The write_cover_letter tool generates the coverletter and types the coverletter into the input field or textarea element identified by the element_index.
    - The element_index is the tag number of the input field or textarea to type the cover letter into. 
+
+6. **Correcting Text Input Mistakes**:
+   - If you make a mistake while typing text into an input field, use the input_text tool to correct it.
+   - The replace argument is set to true to replace the existing text in the input field.
+   - The replace argument is set to false to append the text to the existing text in the input field or to fill empty fields.
+   - Another use case for when this is useful is when you type in a field and you see that the text hasnt been input correctly. You can use the input_text tool to with the replace argument set to true to replace the text with the correct text.
 
 5. **Error Recovery**:
    - If a tool call fails, analyze the error and try alternative approaches

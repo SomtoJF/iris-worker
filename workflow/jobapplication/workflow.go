@@ -100,9 +100,14 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 
 	defer func() {
 		newCtx, _ := workflow.NewDisconnectedContext(sessionCtx)
+		closeOpts := workflow.ActivityOptions{
+			StartToCloseTimeout: 30 * time.Second,
+			RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
+		}
+		newCtx = workflow.WithActivityOptions(newCtx, closeOpts)
 		workflow.ExecuteActivity(newCtx, "ClosePage", browser.ClosePageInput{
 			WorkflowID: workflowId,
-		}).Get(newCtx, nil)
+		})
 	}()
 
 	isApplicationComplete := false

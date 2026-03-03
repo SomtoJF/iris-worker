@@ -134,6 +134,7 @@ func (a *Activity) Type(ctx context.Context, input TypeInput) error {
 	return a.typeSingleField(page, FieldInput{
 		ElementIndex: input.ElementIndex,
 		Text:         input.Text,
+		Replace:      input.Replace,
 	})
 }
 
@@ -187,6 +188,11 @@ func (a *Activity) typeSingleField(page *rod.Page, field FieldInput) error {
 		return fmt.Errorf("element at index %d has no DOM element", field.ElementIndex)
 	}
 
+	if field.Replace {
+		if err := element.Input(""); err != nil {
+			return fmt.Errorf("failed to clear field: %w", err)
+		}
+	}
 	if err := element.Input(field.Text); err != nil {
 		return fmt.Errorf("failed to type text: %w", err)
 	}

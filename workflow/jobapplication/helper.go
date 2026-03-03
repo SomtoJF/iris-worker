@@ -120,8 +120,11 @@ var toolRequestStructureMap = map[string]map[string]interface{}{
 			"text": map[string]interface{}{
 				"type": "string",
 			},
+			"replace": map[string]interface{}{
+				"type": "boolean",
+			},
 		},
-		"required": []string{"element_index", "text"},
+		"required": []string{"element_index", "text", "replace"},
 	},
 	"input_multiple": {
 		"type": "object",
@@ -261,7 +264,7 @@ func planNextAction(ctx workflow.Context, input PlannerRequest) (PlannerResponse
 		SystemMessage:  systemPrompt,
 		UserMessage:    userPrompt,
 		ImageUrl:       &screenshotBase64,
-		Model:          "google/gemini-3-flash-preview",
+		Model:          "x-ai/grok-4.1-fast",
 		ResponseSchema: getPlannerResponseSchema(),
 	}
 
@@ -291,9 +294,9 @@ func executeToolCall(ctx workflow.Context, workflowID string, toolCall ToolCall)
 	resp := make(map[string]interface{})
 	var err error
 	if toolItem.IsWorkflow {
-		err = workflow.ExecuteChildWorkflow(ctx, toolItem.TemporalString, toolCall.Arguments).Get(ctx, resp)
+		err = workflow.ExecuteChildWorkflow(ctx, toolItem.TemporalString, toolCall.Arguments).Get(ctx, &resp)
 	} else {
-		err = workflow.ExecuteActivity(ctx, toolItem.TemporalString, toolCall.Arguments).Get(ctx, resp)
+		err = workflow.ExecuteActivity(ctx, toolItem.TemporalString, toolCall.Arguments).Get(ctx, &resp)
 	}
 	if err != nil {
 		return ToolCallResult{

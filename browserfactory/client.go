@@ -428,6 +428,7 @@ func isInteractive(node *proto.AccessibilityAXNode) bool {
 		"tab":       true,
 		"option":    true,
 		"select":    true,
+		"label":     true,
 		"textarea":  true,
 		"input":     true,
 	}

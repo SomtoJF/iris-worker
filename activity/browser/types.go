@@ -13,7 +13,7 @@ type TakeScreenshotInput struct {
 }
 
 type TakeScreenshotOutput struct {
-	Path        string                                   `json:"path"`
+	Path        string                                  `json:"path"`
 	TaggedNodes []browserfactory.SerializableTaggedNode `json:"tagged_nodes"`
 }
 
@@ -26,11 +26,13 @@ type TypeInput struct {
 	WorkflowID   string `json:"workflow_id"`
 	ElementIndex int    `json:"element_index"`
 	Text         string `json:"text"`
+	Replace      bool   `json:"replace"`
 }
 
 type FieldInput struct {
 	ElementIndex int    `json:"element_index"`
 	Text         string `json:"text"`
+	Replace      bool   `json:"replace"`
 }
 
 type TypeMultipleInput struct {
