@@ -51,7 +51,7 @@ func (a *Activity) TakeScreenshot(ctx context.Context, input TakeScreenshotInput
 		return TakeScreenshotOutput{}, fmt.Errorf("no active page for workflow %s", input.WorkflowID)
 	}
 
-	screenshotPath, taggedNodes, err := a.browserFactory.ScreenshotForLLM(page, input.FileName)
+	screenshotPath, taggedNodes, taggedFileInputNodes, err := a.browserFactory.ScreenshotForLLM(page, input.FileName)
 	if err != nil {
 		return TakeScreenshotOutput{}, err
 	}
@@ -61,9 +61,15 @@ func (a *Activity) TakeScreenshot(ctx context.Context, input TakeScreenshotInput
 		serializableNodes[i] = node.ToSerializable()
 	}
 
+	serializableFileInputNodes := make([]browserfactory.SerializableTaggedFileInputNode, len(taggedFileInputNodes))
+	for i, node := range taggedFileInputNodes {
+		serializableFileInputNodes[i] = node.ToSerializable()
+	}
+
 	return TakeScreenshotOutput{
-		Path:        screenshotPath,
-		TaggedNodes: serializableNodes,
+		Path:                 screenshotPath,
+		TaggedNodes:          serializableNodes,
+		TaggedFileInputNodes: serializableFileInputNodes,
 	}, nil
 }
 
@@ -80,7 +86,7 @@ func (a *Activity) Click(ctx context.Context, input ClickInput) error {
 		return fmt.Errorf("no incognito context for workflow %s", input.WorkflowID)
 	}
 
-	_, taggedNodes, err := a.browserFactory.ScreenshotForLLM(page, "temp.png")
+	_, taggedNodes, _, err := a.browserFactory.ScreenshotForLLM(page, "temp.png")
 	if err != nil {
 		return fmt.Errorf("failed to get tagged nodes: %w", err)
 	}
@@ -173,7 +179,7 @@ func (a *Activity) TypeMultiple(ctx context.Context, input TypeMultipleInput) er
 }
 
 func (a *Activity) typeSingleField(page *rod.Page, field FieldInput) error {
-	_, taggedNodes, err := a.browserFactory.ScreenshotForLLM(page, "temp.png")
+	_, taggedNodes, _, err := a.browserFactory.ScreenshotForLLM(page, "temp.png")
 	if err != nil {
 		return fmt.Errorf("failed to get tagged nodes: %w", err)
 	}
@@ -287,9 +293,9 @@ func (a *Activity) ClosePage(ctx context.Context, input ClosePageInput) error {
 }
 
 type UploadFileInput struct {
-	WorkflowID   string `json:"workflow_id"`
-	FilePath     string `json:"file_path"`
-	ElementIndex int    `json:"element_index"`
+	WorkflowID     string `json:"workflow_id"`
+	FilePath       string `json:"file_path"`
+	FileInputIndex int    `json:"file_input_index"`
 }
 
 func (a *Activity) UploadFile(ctx context.Context, input UploadFileInput) error {
@@ -301,18 +307,18 @@ func (a *Activity) UploadFile(ctx context.Context, input UploadFileInput) error 
 		return fmt.Errorf("no active page for workflow %s", input.WorkflowID)
 	}
 
-	_, taggedNodes, err := a.browserFactory.ScreenshotForLLM(page, "temp.png")
+	_, _, taggedFileInputNodes, err := a.browserFactory.ScreenshotForLLM(page, "temp.png")
 	if err != nil {
 		return fmt.Errorf("failed to get tagged nodes: %w", err)
 	}
 
-	if input.ElementIndex < 0 || input.ElementIndex >= len(taggedNodes) {
-		return fmt.Errorf("element index %d out of range (0-%d)", input.ElementIndex, len(taggedNodes)-1)
+	if input.FileInputIndex < 0 || input.FileInputIndex >= len(taggedFileInputNodes) {
+		return fmt.Errorf("element index %d out of range (0-%d)", input.FileInputIndex, len(taggedFileInputNodes)-1)
 	}
 
-	element := taggedNodes[input.ElementIndex].Element
+	element := taggedFileInputNodes[input.FileInputIndex].Element
 	if element == nil {
-		return fmt.Errorf("element at index %d has no DOM element", input.ElementIndex)
+		return fmt.Errorf("element at index %d has no DOM element", input.FileInputIndex)
 	}
 
 	err = element.SetFiles([]string{input.FilePath})

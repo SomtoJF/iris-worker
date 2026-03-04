@@ -127,16 +127,17 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		}
 
 		plannerRequest := PlannerRequest{
-			IdUser:           input.IdUser,
-			IdJobApplication: input.IdJobApplication,
-			JobPostingUrl:    input.Url,
-			ScreenshotPath:   screenshot.Path,
-			TaggedNodes:      screenshot.TaggedNodes,
-			ToolCallHistory:  toolCallHistory,
-			UserResume:       userResume.Content,
-			JobDescription:   jobDetails.JobDescription,
-			UserResumePath:   resumePath,
-			UserProfile:      userProfile,
+			IdUser:                  input.IdUser,
+			IdJobApplication:        input.IdJobApplication,
+			JobPostingUrl:           input.Url,
+			ScreenshotPath:          screenshot.Path,
+			TaggedNodes:             screenshot.TaggedNodes,
+			TaggedFileInputElements: screenshot.TaggedFileInputNodes,
+			ToolCallHistory:         toolCallHistory,
+			UserResume:              userResume.Content,
+			JobDescription:          jobDetails.JobDescription,
+			UserResumePath:          resumePath,
+			UserProfile:             userProfile,
 		}
 
 		plannerResponse, err := planNextAction(ctx, plannerRequest)

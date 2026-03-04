@@ -47,16 +47,17 @@ type PlannerResponse struct {
 }
 
 type PlannerRequest struct {
-	IdUser           uint                                    `json:"id_user"`
-	IdJobApplication uint                                    `json:"id_job_application"`
-	JobPostingUrl    string                                  `json:"job_posting_url"`
-	JobDescription   string                                  `json:"job_description"`
-	UserResume       string                                  `json:"user_resume"`
-	UserResumePath   string                                  `json:"user_resume_path"`
-	ScreenshotPath   string                                  `json:"screenshot_path"`
-	TaggedNodes      []browserfactory.SerializableTaggedNode `json:"tagged_nodes"`
-	ToolCallHistory  []ToolCallResult                        `json:"tool_call_history"`
-	UserProfile      UserProfile                             `json:"user_profile"`
+	IdUser                  uint                                             `json:"id_user"`
+	IdJobApplication        uint                                             `json:"id_job_application"`
+	JobPostingUrl           string                                           `json:"job_posting_url"`
+	JobDescription          string                                           `json:"job_description"`
+	UserResume              string                                           `json:"user_resume"`
+	UserResumePath          string                                           `json:"user_resume_path"`
+	ScreenshotPath          string                                           `json:"screenshot_path"`
+	TaggedNodes             []browserfactory.SerializableTaggedNode          `json:"tagged_nodes"`
+	TaggedFileInputElements []browserfactory.SerializableTaggedFileInputNode `json:"tagged_file_input_elements"`
+	ToolCallHistory         []ToolCallResult                                 `json:"tool_call_history"`
+	UserProfile             UserProfile                                      `json:"user_profile"`
 }
 
 type ToolItem struct {
@@ -183,14 +184,14 @@ var toolRequestStructureMap = map[string]map[string]interface{}{
 	"upload_file": {
 		"type": "object",
 		"properties": map[string]interface{}{
-			"element_index": map[string]interface{}{
+			"file_input_index": map[string]interface{}{
 				"type": "integer",
 			},
 			"file_path": map[string]interface{}{
 				"type": "string",
 			},
 		},
-		"required": []string{"element_index", "file_path"},
+		"required": []string{"file_input_index", "file_path"},
 	},
 	"write_cover_letter": {
 		"type": "object",

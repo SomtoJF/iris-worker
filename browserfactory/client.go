@@ -47,20 +47,22 @@ func (b *BrowserFactory) GetBrowser() *rod.Browser {
 	return b.browser
 }
 
-func (b *BrowserFactory) ScreenshotForLLM(page *rod.Page, fileName string) (string, []*TaggedAccessibilityNode, error) {
+func (b *BrowserFactory) ScreenshotForLLM(page *rod.Page, fileName string) (string, []*TaggedAccessibilityNode, []*TaggedFileInputNode, error) {
 	screenshotPath := b.fs.ConcatenatePath(fileName)
 
 	var taggedNodes []*TaggedAccessibilityNode
-	var fileInputStorageKey string
+	var taggedFileInputNodes []*TaggedFileInputNode
 
 	err := rod.Try(func() {
 		page.MustWaitLoad()
 
-		// Make hidden file inputs visible before tagging
-		fileInputStorageKey = makeFileInputsVisible(page)
-
 		// Get the accessibility tree for the page
 		accessibilityTree, _ := getPageAccessibilityTree(page)
+
+		fileInputElements, err := getFileInputElements(page)
+		if err != nil {
+			panic(err)
+		}
 
 		// Draw transparent grid lines over the page
 		drawTransparentGrid(page)
@@ -75,16 +77,15 @@ func (b *BrowserFactory) ScreenshotForLLM(page *rod.Page, fileName string) (stri
 			document.querySelectorAll('.agent-tag').forEach(el => el.remove());
 		}`)
 
-		// Restore original file input styles
-		restoreFileInputStyles(page, fileInputStorageKey)
+		taggedFileInputNodes = tagFileInputNodes(page, fileInputElements)
 
 	})
 
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 
-	return screenshotPath, taggedNodes, nil
+	return screenshotPath, taggedNodes, taggedFileInputNodes, nil
 }
 
 func (b *BrowserFactory) OpenUrl(page *rod.Page, url string) *rod.Page {
@@ -105,6 +106,61 @@ func getPageAccessibilityTree(page *rod.Page) ([]*proto.AccessibilityAXNode, err
 	return res.Nodes, nil
 }
 
+func getFileInputElements(page *rod.Page) ([]*rod.Element, error) {
+	page.MustWaitStable()
+	fileInputs, err := page.Elements("input[type='file']")
+	if err != nil {
+		return nil, err
+	}
+
+	return fileInputs, nil
+}
+
+// getLabelHTMLForInput returns the inner HTML of the <label> whose "for"
+// attribute matches the given file input's id, or "" if none.
+func getLabelHTMLForInput(page *rod.Page, input *rod.Element) string {
+	id, err := input.Attribute("id")
+	if err != nil || id == nil || *id == "" {
+		return ""
+	}
+	labels, err := page.Elements("label")
+	if err != nil || len(labels) == 0 {
+		return ""
+	}
+	for _, label := range labels {
+		forAttr, err := label.Attribute("for")
+		if err != nil || forAttr == nil {
+			continue
+		}
+		if *forAttr == *id {
+			html, _ := label.HTML()
+			return html
+		}
+	}
+	return ""
+}
+
+func tagFileInputNodes(page *rod.Page, fileInputNodes []*rod.Element) []*TaggedFileInputNode {
+	var taggedFileInputNodes []*TaggedFileInputNode
+	for i, node := range fileInputNodes {
+		labelHTML := getLabelHTMLForInput(page, node)
+		var labelPtr *string
+		if labelHTML != "" {
+			labelPtr = &labelHTML
+		}
+		html, _ := node.HTML()
+		value, _ := node.Attribute("value")
+		var valuePtr *string
+		if value != nil {
+			valuePtr = value
+		}
+		taggedFileInputNodes = append(taggedFileInputNodes, &TaggedFileInputNode{
+			Index: i, HTML: html, Label: labelPtr, Value: valuePtr, Element: node,
+		})
+	}
+	return taggedFileInputNodes
+}
+
 func drawTransparentGrid(page *rod.Page) {
 	page.MustEval(`() => {
 		const canvas = document.createElement('canvas');
@@ -119,80 +175,6 @@ func drawTransparentGrid(page *rod.Page) {
 		for(let i=0; i<canvas.height; i+=100) { ctx.strokeRect(0, i, canvas.width, 0); }
 		document.body.appendChild(canvas);
 	}`)
-}
-
-// makeFileInputsVisible unhides all file inputs and returns data to restore them later
-func makeFileInputsVisible(page *rod.Page) string {
-	storageKey, _ := page.Eval(`() => {
-		const inputs = document.querySelectorAll('input[type="file"]');
-		const storage = [];
-
-		inputs.forEach((input, index) => {
-			// Store original styles
-			const original = {
-				display: input.style.display,
-				visibility: input.style.visibility,
-				opacity: input.style.opacity,
-				position: input.style.position,
-				width: input.style.width,
-				height: input.style.height
-			};
-			storage.push(original);
-
-			// Make visible at original location
-			input.style.display = 'block';
-			input.style.visibility = 'visible';
-			input.style.opacity = '1';
-			input.style.minWidth = '100px';
-			input.style.minHeight = '20px';
-
-			// Mark with data attribute for later identification
-			input.dataset.fileInputIndex = index;
-		});
-
-		// Store in window for later restoration
-		const storageKey = 'fileInputStyles_' + Date.now();
-		window[storageKey] = storage;
-		return storageKey;
-	}`)
-
-	if storageKey != nil {
-		return storageKey.Value.String()
-	}
-	return ""
-}
-
-// restoreFileInputStyles restores original styles of file inputs
-func restoreFileInputStyles(page *rod.Page, storageKey string) {
-	if storageKey == "" {
-		return
-	}
-
-	page.Eval(`(storageKey) => {
-		const inputs = document.querySelectorAll('input[type="file"]');
-		const storage = window[storageKey];
-
-		if (storage) {
-			inputs.forEach((input, index) => {
-				if (storage[index]) {
-					// Restore original styles
-					const original = storage[index];
-					input.style.display = original.display;
-					input.style.visibility = original.visibility;
-					input.style.opacity = original.opacity;
-					input.style.position = original.position;
-					input.style.width = original.width;
-					input.style.height = original.height;
-
-					// Remove marker
-					delete input.dataset.fileInputIndex;
-				}
-			});
-
-			// Clean up storage
-			delete window[storageKey];
-		}
-	}`, storageKey)
 }
 
 // extractFileInputMetadata extracts rich metadata for a file input element

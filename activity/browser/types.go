@@ -13,8 +13,9 @@ type TakeScreenshotInput struct {
 }
 
 type TakeScreenshotOutput struct {
-	Path        string                                  `json:"path"`
-	TaggedNodes []browserfactory.SerializableTaggedNode `json:"tagged_nodes"`
+	Path                 string                                           `json:"path"`
+	TaggedNodes          []browserfactory.SerializableTaggedNode          `json:"tagged_nodes"`
+	TaggedFileInputNodes []browserfactory.SerializableTaggedFileInputNode `json:"tagged_file_input_nodes"`
 }
 
 type ClickInput struct {

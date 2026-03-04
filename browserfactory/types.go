@@ -7,7 +7,7 @@ import (
 
 type BrowserClient interface {
 	GetBrowser() *rod.Browser
-	ScreenshotForLLM(*rod.Page, string) (string, []*TaggedAccessibilityNode, error)
+	ScreenshotForLLM(*rod.Page, string) (string, []*TaggedAccessibilityNode, []*TaggedFileInputNode, error)
 	OpenPageNewTab(browser *rod.Browser, url string) *rod.Page
 }
 
@@ -17,6 +17,30 @@ type TaggedAccessibilityNode struct {
 	Bounds      *proto.DOMRect
 	Index       int
 	Description string
+}
+
+type TaggedFileInputNode struct {
+	Index   int
+	HTML    string
+	Label   *string
+	Value   *string
+	Element *rod.Element
+}
+
+type SerializableTaggedFileInputNode struct {
+	Index int
+	HTML  string
+	Label *string
+	Value *string
+}
+
+func (t *TaggedFileInputNode) ToSerializable() SerializableTaggedFileInputNode {
+	return SerializableTaggedFileInputNode{
+		Index: t.Index,
+		HTML:  t.HTML,
+		Label: t.Label,
+		Value: t.Value,
+	}
 }
 
 // SerializableTaggedNode is a JSON-serializable version of TaggedAccessibilityNode

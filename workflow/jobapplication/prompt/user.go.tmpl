@@ -32,9 +32,28 @@ Apply to the job posting at: {{.JobPostingUrl}}
 <interactive_elements>
 {{if .TaggedNodes}}The following elements are visible and interactive on the current page:
 {{range .TaggedNodes}}
-- {{.Description}} (index: {{.Index}}, position: x={{printf "%.0f" .X}} y={{printf "%.0f" .Y}})
+<tagged_node>
+index: {{.Index}}
+description: {{.Description}}
+x: {{printf "%.0f" .X}}
+y: {{printf "%.0f" .Y}}
+width: {{printf "%.0f" .Width}}
+height: {{printf "%.0f" .Height}}
+</tagged_node>
 {{end}}{{else}}No interactive elements detected on the current page.{{end}}
 </interactive_elements>
+
+<file_input_elements>
+{{if .TaggedFileInputElements}}The following file input elements are visible on the current page:
+{{range .TaggedFileInputElements}}
+<file_input>
+index: {{.Index}}
+html: {{.HTML}}
+label: {{if .Label}}{{.Label}}{{else}}(none){{end}}
+value: {{if .Value}}{{.Value}}{{else}}(none){{end}}
+</file_input>
+{{end}}{{else}}No file input elements present in the current page.{{end}}
+</file_input_elements>
 </current_page>
 
 <action_history>
