@@ -409,7 +409,7 @@ func retrieveJobDetails(ctx workflow.Context, url string) (JobDetails, error) {
 	}
 
 	// Build LLM request to extract job details
-	systemPrompt := "Extract the job title, company name, and job description from the provided scraped webpage content. Return the data in JSON format."
+	systemPrompt := "Extract the job title, company name, and job description from the provided scraped webpage content. Return the data in JSON format. Most job descriptions have a 'Who we are' or 'About us' or 'Company Description' section that contains the company's details. This is where you should look for the company name."
 	userPrompt := fmt.Sprintf("Scraped content:\n\n%s", scrapedData)
 
 	llmRequest := types.AIPIRequest{
