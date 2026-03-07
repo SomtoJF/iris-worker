@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"text/template"
 
 	s3activity "github.com/SomtoJF/iris-worker/activity/s3"
@@ -453,8 +452,8 @@ func getJobDetailsResponseSchema() map[string]interface{} {
 	}
 }
 
-func loadResumeIntoMemory(ctx workflow.Context, fileKey string) (string, error) {
-	destPath := fmt.Sprintf("%s/%s", os.TempDir(), filepath.Base(fileKey))
+func loadResumeIntoMemory(ctx workflow.Context, filename string, fileKey string) (string, error) {
+	destPath := fmt.Sprintf("%s/%s", os.TempDir(), filename)
 
 	var output s3activity.DownloadFileOutput
 	if err := workflow.ExecuteActivity(ctx, "DownloadFile", s3activity.DownloadFileInput{

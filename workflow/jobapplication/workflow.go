@@ -68,7 +68,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		return err
 	}
 
-	resumePath, err := loadResumeIntoMemory(ctx, userResume.FileKey)
+	resumePath, err := loadResumeIntoMemory(ctx, userResume.FileName, userResume.FileKey)
 	if err != nil {
 		logger.Error("Failed to download and load resume into memory", "error", err)
 		updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
