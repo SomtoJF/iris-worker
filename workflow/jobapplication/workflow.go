@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/SomtoJF/iris-worker/activity/browser"
+	"github.com/SomtoJF/iris-worker/activity/realtimeevent"
 	"github.com/SomtoJF/iris-worker/activity/sqldb"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
@@ -43,13 +44,16 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 
 	workflowId := workflow.GetInfo(ctx).WorkflowExecution.ID
 
+	// jobDetails declared early so it's available to helpers even on pre-retrieval failures
+	var jobDetails JobDetails
+
 	sessionCtx, err := workflow.CreateSession(ctx, &workflow.SessionOptions{
 		ExecutionTimeout: 30 * time.Minute,
 		CreationTimeout:  time.Minute,
 	})
 	if err != nil {
 		logger.Error("Failed to create session", "error", err)
-		updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
+		handleApplicationError(ctx, input, jobDetails)
 		return err
 	}
 	defer workflow.CompleteSession(sessionCtx)
@@ -57,34 +61,34 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	userResume, err := fetchUserResume(ctx, input.IdUser)
 	if err != nil {
 		logger.Error("Failed to fetch user resume", "error", err)
-		updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
+		handleApplicationError(ctx, input, jobDetails)
 		return err
 	}
 
 	userProfile, err := fetchJobApplicationProfile(ctx, input.IdUser)
 	if err != nil {
 		logger.Error("Failed to fetch user profile", "error", err)
-		updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
+		handleApplicationError(ctx, input, jobDetails)
 		return err
 	}
 
 	resumePath, err := loadResumeIntoMemory(ctx, userResume.FileName, userResume.FileKey)
 	if err != nil {
 		logger.Error("Failed to download and load resume into memory", "error", err)
-		updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
+		handleApplicationError(ctx, input, jobDetails)
 		return err
 	}
 
 	if err := openWebpage(sessionCtx, workflowId, input.Url); err != nil {
 		logger.Error("Failed to open webpage", "error", err)
-		updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
+		handleApplicationError(ctx, input, jobDetails)
 		return err
 	}
 
-	jobDetails, err := retrieveJobDetails(sessionCtx, input.Url)
+	jobDetails, err = retrieveJobDetails(sessionCtx, input.Url)
 	if err != nil {
 		logger.Error("Failed to retrieve job details", "error", err)
-		updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
+		handleApplicationError(ctx, input, jobDetails)
 		return err
 	}
 
@@ -94,7 +98,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		"job_description": jobDetails.JobDescription,
 	}); err != nil {
 		logger.Error("Failed to update job application", "error", err)
-		updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
+		handleApplicationError(ctx, input, jobDetails)
 		return err
 	}
 
@@ -122,7 +126,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		}).Get(sessionCtx, &screenshot)
 		if err != nil {
 			logger.Error("Failed to take screenshot", "error", err)
-			updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
+			handleApplicationError(ctx, input, jobDetails)
 			return err
 		}
 
@@ -143,7 +147,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		plannerResponse, err := planNextAction(ctx, plannerRequest)
 		if err != nil {
 			logger.Error("Failed to plan next action", "error", err)
-			updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
+			handleApplicationError(ctx, input, jobDetails)
 			return err
 		}
 
@@ -166,7 +170,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 			})
 			if err != nil {
 				logger.Error("Failed to await user action", "error", err)
-				updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
+				handleApplicationError(ctx, input, jobDetails)
 				return err
 			}
 			continue
@@ -179,19 +183,32 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	}
 
 	if !isApplicationComplete {
-		if err := updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed); err != nil {
-			logger.Error("Failed to update job application status", "error", err)
-			return err
-		}
+		handleApplicationError(ctx, input, jobDetails)
 		logger.Warn("Job application not complete after %d iterations", maxAgentIterations)
 		return fmt.Errorf("job application not complete after %d iterations", maxAgentIterations)
 	}
 
-	if err := updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusApplied); err != nil {
-		logger.Error("Failed to update job application status", "error", err)
-	}
+	handleApplicationSuccess(ctx, input, jobDetails)
 
 	return nil
+}
+
+func handleApplicationError(ctx workflow.Context, input JobApplicationWorkflowInput, jobDetails JobDetails) {
+	updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed)
+	workflow.ExecuteActivity(ctx, "PublishRedisEvent", input.IdUser, string(realtimeevent.EventApplicationFailed), map[string]interface{}{
+		"id":          input.ApplicationExternalId,
+		"jobTitle":    jobDetails.JobTitle,
+		"companyName": jobDetails.CompanyName,
+	}).Get(ctx, nil)
+}
+
+func handleApplicationSuccess(ctx workflow.Context, input JobApplicationWorkflowInput, jobDetails JobDetails) {
+	updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusApplied)
+	workflow.ExecuteActivity(ctx, "PublishRedisEvent", input.IdUser, string(realtimeevent.EventApplicationSuccessful), map[string]interface{}{
+		"id":          input.ApplicationExternalId,
+		"jobTitle":    jobDetails.JobTitle,
+		"companyName": jobDetails.CompanyName,
+	}).Get(ctx, nil)
 }
 
 func openWebpage(ctx workflow.Context, workflowID string, url string) error {

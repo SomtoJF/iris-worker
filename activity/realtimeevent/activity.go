@@ -10,6 +10,14 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+type EventType string
+
+const (
+	EventApplicationSuccessful EventType = "APPLICATION_SUCCESSFUL"
+	EventApplicationFailed     EventType = "APPLICATION_FAILED"
+	EventUserActionRequired    EventType = "USER_NOTIFICATION"
+)
+
 type Activities struct {
 	redisClient *redis.Client
 }
