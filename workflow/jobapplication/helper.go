@@ -99,6 +99,11 @@ var toolItemMap = map[string]ToolItem{
 		Description:    "Generate a cover letter for the current job application",
 		IsWorkflow:     true,
 	},
+	"submit_application": {
+		TemporalString: "SubmitApplicationWorkflow",
+		Description:    "Click final submit button and verify form submission",
+		IsWorkflow:     true,
+	},
 }
 
 var toolRequestStructureMap = map[string]map[string]interface{}{
@@ -206,6 +211,15 @@ var toolRequestStructureMap = map[string]map[string]interface{}{
 			},
 		},
 		"required": []string{"id_user", "id_job_application", "element_index"},
+	},
+	"submit_application": {
+		"type": "object",
+		"properties": map[string]interface{}{
+			"element_index": map[string]interface{}{
+				"type": "integer",
+			},
+		},
+		"required": []string{"element_index"},
 	},
 }
 

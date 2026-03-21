@@ -55,3 +55,38 @@ type NavigateInput struct {
 type ClosePageInput struct {
 	WorkflowID string `json:"workflow_id"`
 }
+
+type GetFormActionInput struct {
+	WorkflowID string `json:"workflow_id"`
+}
+
+type GetFormActionOutput struct {
+	Action     string `json:"action"`
+	HasAction  bool   `json:"has_action"`
+	CurrentURL string `json:"current_url"`
+}
+
+type HijackSubmitClickInput struct {
+	WorkflowID   string `json:"workflow_id"`
+	ElementIndex int    `json:"element_index"`
+	ActionURL    string `json:"action_url"`
+}
+
+type HijackSubmitClickOutput struct {
+	StatusCode   int    `json:"status_code"`
+	ResponseBody string `json:"response_body"`
+	TimedOut     bool   `json:"timed_out"`
+}
+
+type CheckSubmissionFallbackInput struct {
+	WorkflowID   string `json:"workflow_id"`
+	ElementIndex int    `json:"element_index"`
+	BeforeURL    string `json:"before_url"`
+	SkipClick    bool   `json:"skip_click"`
+}
+
+type CheckSubmissionFallbackOutput struct {
+	Submitted       bool   `json:"submitted"`
+	DetectionMethod string `json:"detection_method"`
+	Message         string `json:"message"`
+}

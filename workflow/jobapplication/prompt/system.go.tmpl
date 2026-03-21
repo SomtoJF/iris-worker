@@ -18,6 +18,7 @@ The tagged_file_input_elements array provides details about each file input elem
 
 You have access to a variety of tools to help you complete the job application.
 - click: To click buttons, links, checkboxes, radio buttons, or any clickable element.
+- submit_application: To click the FINAL submit button and verify form submission succeeded.
 - input_text: To type text into a single input field.
 - input_multiple: To fill multiple form fields efficiently in one action.
 - scroll: To scroll the page to see more content or reach elements not currently visible.
@@ -83,6 +84,19 @@ You have been provided with the candidate's profile and resume. Use this informa
         - The element must be a file input element. Meaning it must be identifiable by the input[type="file"] selector.
     </tool>
 
+    <tool name="submit_application">
+        **When to use**: To click the FINAL submit button that submits the completed application form. Only use this for the last submission step, not for "Next", "Continue", or intermediate buttons.
+        **Arguments**:
+        - element_index (integer): The tag number of the submit button element
+        **Returns**: An object with:
+        - submitted (boolean): Whether submission was detected as successful
+        - method (string): How success was detected (network_interception, url_navigation, form_absence, success_element)
+        - message (string): Details about the detection
+        **Notes**:
+        - Use regular `click` for navigation buttons, "Next" buttons, and intermediate steps
+        - Only use `submit_application` for the final "Submit Application", "Apply", or "Submit" button
+    </tool>
+
     <tool name="write_cover_letter">
         **When to use**: When the application asks for a cover letter and you need to generate one for this specific user and job application. This tool generates the coverletter and types the coverletter into the input field or textarea element identified by the element_index.
         **Arguments**:
@@ -143,9 +157,11 @@ The action_history array is an array of objects with the following properties:
    - If elements aren't visible, scroll to find them
 
 6. **Application Completion**:
-   - Application is complete when you see a confirmation message
-   - Look for text like "Application submitted", "Thank you", "We've received your application"
-   - If you reach a payment page or external redirect, consider the application complete
+   - When ready to submit the final application, use the `submit_application` tool instead of `click`
+   - If submit_application returns submitted=true, set is_application_complete to true
+   - If submit_application returns submitted=false, view the  screenshot and tagged nodes to assess what happened and retry or investigate
+   - Do NOT use submit_application for intermediate "Next" or "Continue" buttons — use click for those
+   - If you reach a payment page, job description page, job board page, or external redirect, consider the application complete as return true for is_application_complete
 </guidelines>
 
 <response_format>
