@@ -248,8 +248,33 @@ func getDescriptionFromNode(node *proto.AccessibilityAXNode, index int, element 
 	desc := fmt.Sprintf("Tag %d: %s %s", index, name, role)
 	if value != "" {
 		desc += fmt.Sprintf(" with value %s", value)
+	} else {
+		if role == "combobox" && element != nil {
+			// try to get the value from the react select combobox
+			reactVal, err := getReactSelectComboboxValue(element)
+			if err == nil && reactVal != "" {
+				desc += fmt.Sprintf(" with value %s", reactVal)
+			}
+		}
 	}
 	return desc
+}
+
+func getReactSelectComboboxValue(element *rod.Element) (string, error) {
+	// We start from the input and look for the "Value Container" sibling
+	val, err := element.Eval(`() => {
+        const container = this.closest('.select__control');
+        if (!container) return "NOT_FOUND";
+        
+        // Look for the specific class Greenhouse uses for the selected text
+        const displayValue = container.querySelector('[class*="single-value"]');
+        return displayValue ? displayValue.innerText : "";
+    }`)
+
+	if err != nil {
+		return "", err
+	}
+	return val.Value.String(), nil
 }
 
 // isInteractive checks if node has interactive role

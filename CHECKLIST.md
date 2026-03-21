@@ -17,7 +17,7 @@
   - Citizenships
 - [ x ] Wire in Redis Pub/Sub to worker repo
 - [ x ] Figure out how to detect form/application submissions to end the application process
-- [ ] Investigate Nil values being passed for select inputs when they do have values
+- [ x ] Investigate Nil values being passed for select inputs when they do have values
 - [ ] Figure out captcha avoidance
 - [ ] Research the best and cheapest google job search tool
 - [ ] Implement job search
