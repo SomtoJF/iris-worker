@@ -198,8 +198,8 @@ func (a *Activity) typeSingleField(page *rod.Page, field FieldInput) error {
 	}
 
 	if field.Replace {
-		if err := element.Input(""); err != nil {
-			return fmt.Errorf("failed to clear field: %w", err)
+		if err := element.SelectAllText(); err != nil {
+			return fmt.Errorf("failed to select all text: %w", err)
 		}
 	}
 	if err := element.Input(field.Text); err != nil {

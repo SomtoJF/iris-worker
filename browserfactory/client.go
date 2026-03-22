@@ -245,19 +245,34 @@ func getDescriptionFromNode(node *proto.AccessibilityAXNode, index int, element 
 	}
 
 	// Default description for non-file inputs
-	desc := fmt.Sprintf("Tag %d: %s %s", index, name, role)
+	desc := fmt.Sprintf("Tag %d: Role: %s - Name: %s", index, strings.ToUpper(role), name)
 	if value != "" {
-		desc += fmt.Sprintf(" with value %s", value)
+		desc += fmt.Sprintf(" Value: %s", value)
 	} else {
 		if role == "combobox" && element != nil {
-			// try to get the value from the react select combobox
 			reactVal, err := getReactSelectComboboxValue(element)
 			if err == nil && reactVal != "" {
-				desc += fmt.Sprintf(" with value %s", reactVal)
+				desc += fmt.Sprintf(" Value: %s", reactVal)
 			}
 		}
 	}
+
+	if role == "checkbox" || role == "radio" || role == "switch" {
+		if checked := getCheckboxCheckedState(node); checked != "" {
+			desc += fmt.Sprintf(" Checked: %s", checked)
+		}
+	}
+
 	return desc
+}
+
+func getCheckboxCheckedState(node *proto.AccessibilityAXNode) string {
+	for _, prop := range node.Properties {
+		if prop.Name == "checked" && prop.Value != nil {
+			return prop.Value.Value.String()
+		}
+	}
+	return ""
 }
 
 func getReactSelectComboboxValue(element *rod.Element) (string, error) {
