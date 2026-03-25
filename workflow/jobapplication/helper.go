@@ -12,6 +12,7 @@ import (
 	"github.com/SomtoJF/iris-worker/aipi/types"
 	"github.com/SomtoJF/iris-worker/browserfactory"
 	"github.com/SomtoJF/iris-worker/helper"
+	"github.com/SomtoJF/iris-worker/shared"
 	"go.temporal.io/sdk/workflow"
 )
 
@@ -38,11 +39,11 @@ type ToolCallResult struct {
 }
 
 type PlannerResponse struct {
-	IsApplicationComplete bool       `json:"is_application_complete"`
-	RequiresUserAction    bool       `json:"requires_user_action"`
-	UserAction            UserAction `json:"user_action"`
-	ToolCall              *ToolCall  `json:"tool_call,omitempty"`
-	Reasoning             string     `json:"reasoning,omitempty"`
+	IsApplicationComplete bool              `json:"is_application_complete"`
+	RequiresUserAction    bool              `json:"requires_user_action"`
+	UserAction            shared.UserAction `json:"user_action"`
+	ToolCall              *ToolCall         `json:"tool_call,omitempty"`
+	Reasoning             string            `json:"reasoning,omitempty"`
 }
 
 type PlannerRequest struct {
@@ -325,6 +326,21 @@ func executeToolCall(ctx workflow.Context, workflowID string, toolCall ToolCall)
 	}
 }
 
+type UserActionLayoutItem struct {
+	Type      *string   `json:"type"`       //e.g password, text, number, phone, email etc.
+	FieldName string    `json:"field_name"` //e.g Username, OTP, Password, etc.
+	Component *string   `json:"component"`  //e.g input, textarea, select, radio, checkbox, etc.
+	Options   *[]string `json:"options"`    //e.g ["Option 1", "Option 2", "Option 3"]
+}
+
+type UserActionResultItem struct {
+	FieldName string `json:"field_name"` //e.g Username, OTP, Password, etc.
+	Value     string `json:"value"`      //e.g "John Doe", "123456", "password", etc.
+}
+
+type UserActionLayout []UserActionLayoutItem
+type UserActionResult []UserActionResultItem
+
 func getPlannerResponseSchema() map[string]interface{} {
 	// Build list of tool names for enum
 	toolNames := make([]string, 0, len(toolRequestStructureMap))
@@ -347,7 +363,7 @@ func getPlannerResponseSchema() map[string]interface{} {
 				"oneOf": []map[string]interface{}{
 					{
 						"type": "string",
-						"enum": []string{string(UserActionCaptcha), string(UserActionAuthentication)},
+						"enum": []string{string(shared.UserActionCaptcha), string(shared.UserActionAuthentication), string(shared.UserActionOTP)},
 					},
 					{"type": "null"},
 				},

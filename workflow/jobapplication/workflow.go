@@ -7,16 +7,9 @@ import (
 	"github.com/SomtoJF/iris-worker/activity/browser"
 	"github.com/SomtoJF/iris-worker/activity/realtimeevent"
 	"github.com/SomtoJF/iris-worker/activity/sqldb"
+	"github.com/SomtoJF/iris-worker/shared"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
-)
-
-// UserAction is the action the user needs to take when the workflow is blocked.
-type UserAction string
-
-const (
-	UserActionCaptcha        = "USER_ACTION_CAPTCHA"
-	UserActionAuthentication = "USER_ACTION_AUTHENTICATION"
 )
 
 type JobApplicationWorkflowInput struct {
@@ -162,7 +155,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 			}
 			err = awaitUserAction(ctx, AwaitUserActionInput{
 				WorkflowId:            workflowId,
-				UserAction:            UserAction(plannerResponse.UserAction),
+				UserAction:            shared.UserAction(plannerResponse.UserAction),
 				CompanyName:           jobDetails.CompanyName,
 				JobTitle:              jobDetails.JobTitle,
 				IdUser:                input.IdUser,
@@ -241,7 +234,7 @@ type NotifyHumanActivityInput struct {
 
 type AwaitUserActionInput struct {
 	WorkflowId            string
-	UserAction            UserAction
+	UserAction            shared.UserAction
 	CompanyName           string
 	JobTitle              string
 	IdUser                uint
@@ -253,10 +246,12 @@ func awaitUserAction(ctx workflow.Context, input AwaitUserActionInput) error {
 
 	notificationMessage := ""
 	switch input.UserAction {
-	case UserActionCaptcha:
+	case shared.UserActionCaptcha:
 		notificationMessage = fmt.Sprintf("Your application for %s at %s is blocked on a CAPTCHA. Please help with the CAPTCHA.", input.JobTitle, input.CompanyName)
-	case UserActionAuthentication:
+	case shared.UserActionAuthentication:
 		notificationMessage = fmt.Sprintf("Your application for %s at %s is blocked on a login screen. Please help with the authentication.", input.JobTitle, input.CompanyName)
+	case shared.UserActionOTP:
+		notificationMessage = fmt.Sprintf("Your application for %s at %s is blocked on a OTP screen. Please help with the OTP.", input.JobTitle, input.CompanyName)
 	}
 
 	// Tell the UI/Human that we are blocked

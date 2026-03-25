@@ -189,6 +189,7 @@ If the current page is blocking progress and requires human intervention, do NOT
 
 - Cloudflare challenge, CAPTCHA, bot-detection, or "Verify you are human" screen → user_action: "USER_ACTION_CAPTCHA"
 - Login page, sign-in wall, or any authentication gate → user_action: "USER_ACTION_AUTHENTICATION"
+- OTP page, OTP verification screen, or any OTP gate → user_action: "USER_ACTION_OTP"
 
 In all other cases set requires_user_action to false and user_action to null.
 </blocking_pages>
