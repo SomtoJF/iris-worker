@@ -1,0 +1,34 @@
+<task>
+You are analyzing a screenshot of a web page that is blocking an automated job application. The page requires human intervention. Your job is to identify the form fields the user needs to fill out and return a structured layout describing those fields.
+</task>
+
+<context>
+User action type: {{.UserAction}}
+Action details: {{.ActionDetails}}
+</context>
+
+<instructions>
+Analyze the screenshot and identify all form fields the user needs to interact with to resolve the blocking page.
+
+For each field, provide:
+- field_name: A human-readable label for the field (e.g. "Username", "Password", "OTP Code", "CAPTCHA Text")
+- type: The HTML input type if applicable (e.g. "text", "password", "number", "email", "tel"). Null if not an input.
+- component: The UI component type (e.g. "input", "textarea", "select", "radio", "checkbox"). Null if unknown.
+- options: For select/radio/checkbox fields, provide the available options as an array. Null otherwise.
+
+Common patterns by action type:
+- USER_ACTION_CAPTCHA: Usually a single text input for the CAPTCHA solution
+- USER_ACTION_AUTHENTICATION: Usually username/email + password fields, sometimes "remember me" checkbox
+- USER_ACTION_OTP: Usually a single numeric input for the OTP code
+</instructions>
+
+<response_format>
+Respond with a JSON array of field objects. Example:
+[
+  {"field_name": "Email", "type": "email", "component": "input", "options": null},
+  {"field_name": "Password", "type": "password", "component": "input", "options": null}
+]
+
+If the page has no identifiable form fields (e.g. a pure CAPTCHA image with no input), return a single field:
+[{"field_name": "CAPTCHA Solution", "type": "text", "component": "input", "options": null}]
+</response_format>

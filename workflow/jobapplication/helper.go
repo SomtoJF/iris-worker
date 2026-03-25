@@ -12,7 +12,6 @@ import (
 	"github.com/SomtoJF/iris-worker/aipi/types"
 	"github.com/SomtoJF/iris-worker/browserfactory"
 	"github.com/SomtoJF/iris-worker/helper"
-	"github.com/SomtoJF/iris-worker/shared"
 	"go.temporal.io/sdk/workflow"
 )
 
@@ -39,11 +38,9 @@ type ToolCallResult struct {
 }
 
 type PlannerResponse struct {
-	IsApplicationComplete bool              `json:"is_application_complete"`
-	RequiresUserAction    bool              `json:"requires_user_action"`
-	UserAction            shared.UserAction `json:"user_action"`
-	ToolCall              *ToolCall         `json:"tool_call,omitempty"`
-	Reasoning             string            `json:"reasoning,omitempty"`
+	IsApplicationComplete bool      `json:"is_application_complete"`
+	ToolCall              *ToolCall `json:"tool_call,omitempty"`
+	Reasoning             string    `json:"reasoning,omitempty"`
 }
 
 type PlannerRequest struct {
@@ -103,6 +100,11 @@ var toolItemMap = map[string]ToolItem{
 	"submit_application": {
 		TemporalString: "SubmitApplicationWorkflow",
 		Description:    "Click final submit button and verify form submission",
+		IsWorkflow:     true,
+	},
+	"handle_user_action": {
+		TemporalString: "HandleUserActionWorkflow",
+		Description:    "Request user intervention for blocking pages",
 		IsWorkflow:     true,
 	},
 }
@@ -222,6 +224,25 @@ var toolRequestStructureMap = map[string]map[string]interface{}{
 		},
 		"required": []string{"element_index"},
 	},
+	"handle_user_action": {
+		"type": "object",
+		"properties": map[string]interface{}{
+			"user_action": map[string]interface{}{
+				"type": "string",
+				"enum": []string{"USER_ACTION_CAPTCHA", "USER_ACTION_AUTHENTICATION", "USER_ACTION_OTP"},
+			},
+			"action_details": map[string]interface{}{
+				"type": "string",
+			},
+			"id_user": map[string]interface{}{
+				"type": "integer",
+			},
+			"id_job_application": map[string]interface{}{
+				"type": "integer",
+			},
+		},
+		"required": []string{"user_action", "action_details", "id_user", "id_job_application"},
+	},
 }
 
 func init() {
@@ -326,21 +347,6 @@ func executeToolCall(ctx workflow.Context, workflowID string, toolCall ToolCall)
 	}
 }
 
-type UserActionLayoutItem struct {
-	Type      *string   `json:"type"`       //e.g password, text, number, phone, email etc.
-	FieldName string    `json:"field_name"` //e.g Username, OTP, Password, etc.
-	Component *string   `json:"component"`  //e.g input, textarea, select, radio, checkbox, etc.
-	Options   *[]string `json:"options"`    //e.g ["Option 1", "Option 2", "Option 3"]
-}
-
-type UserActionResultItem struct {
-	FieldName string `json:"field_name"` //e.g Username, OTP, Password, etc.
-	Value     string `json:"value"`      //e.g "John Doe", "123456", "password", etc.
-}
-
-type UserActionLayout []UserActionLayoutItem
-type UserActionResult []UserActionResultItem
-
 func getPlannerResponseSchema() map[string]interface{} {
 	// Build list of tool names for enum
 	toolNames := make([]string, 0, len(toolRequestStructureMap))
@@ -354,20 +360,6 @@ func getPlannerResponseSchema() map[string]interface{} {
 			"is_application_complete": map[string]interface{}{
 				"type":        "boolean",
 				"description": "Whether the job application has been successfully completed",
-			},
-			"requires_user_action": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Whether the workflow requires user action to continue",
-			},
-			"user_action": map[string]interface{}{
-				"oneOf": []map[string]interface{}{
-					{
-						"type": "string",
-						"enum": []string{string(shared.UserActionCaptcha), string(shared.UserActionAuthentication), string(shared.UserActionOTP)},
-					},
-					{"type": "null"},
-				},
-				"description": "The user action required; null if requires_user_action is false",
 			},
 			"tool_call": map[string]interface{}{
 				"anyOf": []map[string]interface{}{
@@ -386,14 +378,14 @@ func getPlannerResponseSchema() map[string]interface{} {
 						"required": []string{"name", "arguments"},
 					},
 				},
-				"description": "The next tool to execute, or null when no action is needed",
+				"description": "The next tool to execute, or null when is_application_complete is true",
 			},
 			"reasoning": map[string]interface{}{
 				"type":        "string",
 				"description": "Brief explanation of the decision and next action",
 			},
 		},
-		"required": []string{"is_application_complete", "reasoning", "requires_user_action", "tool_call"},
+		"required": []string{"is_application_complete", "reasoning", "tool_call"},
 	}
 }
 
@@ -406,14 +398,6 @@ func getBase64Screenshot(screenshotPath string) (string, error) {
 	base64Screenshot := base64.StdEncoding.EncodeToString(screenshot)
 
 	return fmt.Sprintf("data:image/jpeg;base64,%s", base64Screenshot), nil
-}
-
-func sendUserNotification(ctx workflow.Context, userID uint, workflowID string, applicationId string, message string) error {
-	return workflow.ExecuteActivity(ctx, "PublishRedisEvent", userID, "USER_NOTIFICATION", map[string]interface{}{
-		"message":        message,
-		"workflow_id":    workflowID,
-		"application_id": applicationId,
-	}).Get(ctx, nil)
 }
 
 type JobDetails struct {

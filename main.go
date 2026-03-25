@@ -100,4 +100,5 @@ func registerJobApplicationActivities(w worker.Worker, dependencies common.Depen
 func loadTemplates() {
 	jobapplication.SetTemplates()
 	coverletter.SetTemplates()
+	handleuseraction.SetTemplates()
 }

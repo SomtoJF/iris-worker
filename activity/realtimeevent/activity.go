@@ -15,7 +15,8 @@ type EventType string
 const (
 	EventApplicationSuccessful EventType = "APPLICATION_SUCCESSFUL"
 	EventApplicationFailed     EventType = "APPLICATION_FAILED"
-	EventUserActionRequired    EventType = "USER_NOTIFICATION"
+	EventUserNotification      EventType = "USER_NOTIFICATION"
+	EventUserActionRequired    EventType = "USER_ACTION_REQUIRED"
 )
 
 type Activities struct {

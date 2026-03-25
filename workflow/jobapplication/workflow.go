@@ -7,7 +7,6 @@ import (
 	"github.com/SomtoJF/iris-worker/activity/browser"
 	"github.com/SomtoJF/iris-worker/activity/realtimeevent"
 	"github.com/SomtoJF/iris-worker/activity/sqldb"
-	"github.com/SomtoJF/iris-worker/shared"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
@@ -149,26 +148,6 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 			break
 		}
 
-		if plannerResponse.RequiresUserAction {
-			if err := updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusBlocked); err != nil {
-				logger.Error("Failed to update job application status", "error", err)
-			}
-			err = awaitUserAction(ctx, AwaitUserActionInput{
-				WorkflowId:            workflowId,
-				UserAction:            shared.UserAction(plannerResponse.UserAction),
-				CompanyName:           jobDetails.CompanyName,
-				JobTitle:              jobDetails.JobTitle,
-				IdUser:                input.IdUser,
-				ApplicationExternalId: input.ApplicationExternalId,
-			})
-			if err != nil {
-				logger.Error("Failed to await user action", "error", err)
-				handleApplicationError(ctx, input, jobDetails)
-				return err
-			}
-			continue
-		}
-
 		if plannerResponse.ToolCall != nil {
 			result := executeToolCall(sessionCtx, workflowId, *plannerResponse.ToolCall)
 			toolCallHistory = append(toolCallHistory, result)
@@ -225,60 +204,6 @@ func updateJobApplication(ctx workflow.Context, idJobApplication uint, data map[
 		IdJobApplication: idJobApplication,
 		Data:             data,
 	}).Get(ctx, nil)
-}
-
-type NotifyHumanActivityInput struct {
-	Message    string `json:"message"`
-	WorkflowID string `json:"workflow_id"`
-}
-
-type AwaitUserActionInput struct {
-	WorkflowId            string
-	UserAction            shared.UserAction
-	CompanyName           string
-	JobTitle              string
-	IdUser                uint
-	ApplicationExternalId string
-}
-
-func awaitUserAction(ctx workflow.Context, input AwaitUserActionInput) error {
-	signalChan := workflow.GetSignalChannel(ctx, string(input.UserAction))
-
-	notificationMessage := ""
-	switch input.UserAction {
-	case shared.UserActionCaptcha:
-		notificationMessage = fmt.Sprintf("Your application for %s at %s is blocked on a CAPTCHA. Please help with the CAPTCHA.", input.JobTitle, input.CompanyName)
-	case shared.UserActionAuthentication:
-		notificationMessage = fmt.Sprintf("Your application for %s at %s is blocked on a login screen. Please help with the authentication.", input.JobTitle, input.CompanyName)
-	case shared.UserActionOTP:
-		notificationMessage = fmt.Sprintf("Your application for %s at %s is blocked on a OTP screen. Please help with the OTP.", input.JobTitle, input.CompanyName)
-	}
-
-	// Tell the UI/Human that we are blocked
-	err := sendUserNotification(ctx, input.IdUser, input.WorkflowId, input.ApplicationExternalId, notificationMessage)
-	if err != nil {
-		return err
-	}
-
-	// Create a 5-minute timeout timer
-	timerChan := workflow.NewTimer(ctx, 5*time.Minute)
-
-	// Wait for either the signal or the timeout
-	selector := workflow.NewSelector(ctx)
-	signalReceived := false
-	selector.AddReceive(signalChan, func(c workflow.ReceiveChannel, more bool) {
-		c.Receive(ctx, nil)
-		signalReceived = true
-	})
-	selector.AddFuture(timerChan, func(f workflow.Future) {
-		// Timer fired - timeout occurred
-	})
-	selector.Select(ctx)
-
-	if !signalReceived {
-		return fmt.Errorf("timeout waiting for user action %s after 5 minutes", input.UserAction)
-	}
-	return nil
 }
 
 func fetchUserResume(ctx workflow.Context, idUser uint) (sqldb.Resume, error) {
