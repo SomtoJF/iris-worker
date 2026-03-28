@@ -15,6 +15,7 @@ type User struct {
 	LastName              string                `gorm:"not null"`
 	Email                 string                `gorm:"uniqueIndex;not null"`
 	PasswordHash          string                `gorm:"not null"`
+	IsAdmin               bool                  `gorm:"default:false"`
 	CreatedAt             time.Time             `gorm:"default:CURRENT_TIMESTAMP"`
 	UpdatedAt             time.Time             `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime"`
 	DeletedAt             *time.Time            `gorm:"index;default:NULL"`
