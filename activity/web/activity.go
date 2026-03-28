@@ -24,6 +24,7 @@ func NewActivity() *Activity {
 
 type ScrapeWebPageInput struct {
 	Url      string `json:"url"`
+	IdUser   uint   `json:"id_user"`
 	Advanced string `json:"advanced"`
 }
 

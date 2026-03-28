@@ -162,6 +162,8 @@ func getModelRates(model string) modelRates {
 		"google/gemini-flash-1.5-8b":                   {inputRate: 0.0375, outputRate: 0.15},
 		"microsoft/phi-3-mini-128k-instruct:free":      {inputRate: 0, outputRate: 0},
 		"liquid/lfm-7b":                                {inputRate: 0.10, outputRate: 0.10},
+		"x-ai/grok-4.1-fast":                           {inputRate: 0.20, outputRate: 0.50},
+		"x-ai/grok-4-fast":                             {inputRate: 0.20, outputRate: 0.50},
 	}
 
 	if rate, ok := rates[model]; ok {

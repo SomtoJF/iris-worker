@@ -39,7 +39,7 @@ func ProcessResumeWorkflow(ctx workflow.Context, input ProcessResumeWorkflowInpu
 		return err
 	}
 
-	resumeContent, err := processResumeContent(ctx, input.ResumeContent)
+	resumeContent, err := processResumeContent(ctx, input.ResumeContent, input.IdUser)
 	if err != nil {
 		logger.Error("Failed to process resume content", "error", err)
 		return err
@@ -76,7 +76,7 @@ func getUser(ctx workflow.Context, idUser uint) (sqldb.User, error) {
 	return user, nil
 }
 
-func processResumeContent(ctx workflow.Context, resumeContent string) (ResumeContent, error) {
+func processResumeContent(ctx workflow.Context, resumeContent string, idUser uint) (ResumeContent, error) {
 	systemPrompt := "Extract structured resume fields from the given resume text. Return only valid JSON with the requested fields. Use empty string for any field not found."
 	userPrompt := fmt.Sprintf("Resume text:\n\n%s", resumeContent)
 
@@ -85,6 +85,7 @@ func processResumeContent(ctx workflow.Context, resumeContent string) (ResumeCon
 		UserMessage:    userPrompt,
 		Model:          "x-ai/grok-4.1-fast",
 		ResponseSchema: getResumeContentResponseSchema(),
+		IdUser:         idUser,
 	}
 
 	var llmResponse types.AIPIResponse

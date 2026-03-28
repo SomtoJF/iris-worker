@@ -16,11 +16,44 @@ For each field, provide:
 - component: The UI component type (e.g. "input", "textarea", "select", "radio", "checkbox"). Null if unknown.
 - options: For select/radio/checkbox fields, provide the available options as an array. Null otherwise.
 
+Simplicity (critical):
+- Output the smallest set of fields that still lets the user complete the step. Do not add optional or decorative fields (e.g. "remember me", marketing checkboxes) unless they are clearly required to proceed.
+- Prefer plain `input` (or `textarea` only when the page clearly needs multi-line text). Avoid splitting one value into multiple fields: e.g. one OTP is always a single `input` with `type` "text" (not six separate boxes, not `number` unless the page is strictly numeric-only).
+- Do not invent fields that are not visible or implied by the screenshot and action type. Match labels to what the user actually sees.
+
 Common patterns by action type:
 - USER_ACTION_CAPTCHA: Usually a single text input for the CAPTCHA solution
-- USER_ACTION_AUTHENTICATION: Usually username/email + password fields, sometimes "remember me" checkbox
-- USER_ACTION_OTP: Usually a single numeric input for the OTP code
+- USER_ACTION_AUTHENTICATION: Usually username/email + password fields; add a second factor field only if the screenshot shows it
+- USER_ACTION_OTP: Almost always one text input for the full code (six digits in one box is one field, not six)
 </instructions>
+
+<few_shot_examples>
+Example 1 — OTP (keep it one field):
+Screenshot shows a single "Enter verification code" box.
+[
+  {"field_name": "Verification code", "type": "text", "component": "input", "options": null}
+]
+
+Example 2 — CAPTCHA:
+Screenshot shows an image and one text box for the answer.
+[
+  {"field_name": "CAPTCHA solution", "type": "text", "component": "input", "options": null}
+]
+
+Example 3 — Login (minimal):
+Screenshot shows email and password only.
+[
+  {"field_name": "Email", "type": "email", "component": "input", "options": null},
+  {"field_name": "Password", "type": "password", "component": "input", "options": null}
+]
+
+Example 4 — Select with visible options:
+Screenshot shows a dropdown labeled "Country" with listed countries.
+[
+  {"field_name": "Country", "type": null, "component": "select", "options": ["United States", "Canada", "United Kingdom"]}
+]
+List options only when they are clearly visible; otherwise prefer a single simple `input` that matches the page.
+</few_shot_examples>
 
 <response_format>
 Respond with a JSON array of field objects. Example:

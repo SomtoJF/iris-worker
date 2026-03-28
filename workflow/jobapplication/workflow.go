@@ -77,7 +77,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		return err
 	}
 
-	jobDetails, err = retrieveJobDetails(sessionCtx, input.Url)
+	jobDetails, err = retrieveJobDetails(sessionCtx, input.Url, input.IdUser, input.IdJobApplication)
 	if err != nil {
 		logger.Error("Failed to retrieve job details", "error", err)
 		handleApplicationError(ctx, input, jobDetails)
@@ -149,7 +149,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		}
 
 		if plannerResponse.ToolCall != nil {
-			result := executeToolCall(sessionCtx, workflowId, *plannerResponse.ToolCall)
+			result := executeToolCall(sessionCtx, workflowId, input.IdUser, *plannerResponse.ToolCall)
 			toolCallHistory = append(toolCallHistory, result)
 		}
 	}

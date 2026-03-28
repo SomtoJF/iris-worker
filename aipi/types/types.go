@@ -9,10 +9,12 @@ type AIPIRequest struct {
 	UserMessage   string `json:"user_message"`
 	Model         string `json:"model"`
 	// ImageUrl can either be a url or a base64 encoded image
-	ImageUrl       *string  `json:"image_url,omitempty"`
-	MaxTokens      *int     `json:"max_tokens,omitempty"`
-	ResponseSchema any      `json:"response_schema,omitempty"`
-	Temperature    *float64 `json:"temperature,omitempty"`
+	ImageUrl         *string  `json:"image_url,omitempty"`
+	MaxTokens        *int     `json:"max_tokens,omitempty"`
+	ResponseSchema   any      `json:"response_schema,omitempty"`
+	Temperature      *float64 `json:"temperature,omitempty"`
+	IdUser           uint     `json:"id_user"`
+	IdJobApplication *uint    `json:"id_job_application,omitempty"`
 }
 
 type AIPIResponse struct {

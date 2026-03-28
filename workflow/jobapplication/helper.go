@@ -297,11 +297,13 @@ func planNextAction(ctx workflow.Context, input PlannerRequest) (PlannerResponse
 	}
 
 	llmRequest := types.AIPIRequest{
-		SystemMessage:  systemPrompt,
-		UserMessage:    userPrompt,
-		ImageUrl:       &screenshotBase64,
-		Model:          "x-ai/grok-4.1-fast",
-		ResponseSchema: getPlannerResponseSchema(),
+		SystemMessage:    systemPrompt,
+		UserMessage:      userPrompt,
+		ImageUrl:         &screenshotBase64,
+		Model:            "x-ai/grok-4.1-fast",
+		ResponseSchema:   getPlannerResponseSchema(),
+		IdUser:           input.IdUser,
+		IdJobApplication: &input.IdJobApplication,
 	}
 
 	var llmResponse types.AIPIResponse
@@ -317,7 +319,7 @@ func planNextAction(ctx workflow.Context, input PlannerRequest) (PlannerResponse
 	return plannerResponse, nil
 }
 
-func executeToolCall(ctx workflow.Context, workflowID string, toolCall ToolCall) ToolCallResult {
+func executeToolCall(ctx workflow.Context, workflowID string, userID uint, toolCall ToolCall) ToolCallResult {
 	toolItem, exists := toolItemMap[toolCall.Name]
 	if !exists {
 		return ToolCallResult{
@@ -327,6 +329,7 @@ func executeToolCall(ctx workflow.Context, workflowID string, toolCall ToolCall)
 	}
 
 	toolCall.Arguments["workflow_id"] = workflowID
+	toolCall.Arguments["user_id"] = userID
 	resp := make(map[string]interface{})
 	var err error
 	if toolItem.IsWorkflow {
@@ -406,7 +409,7 @@ type JobDetails struct {
 	JobDescription string `json:"job_description"`
 }
 
-func retrieveJobDetails(ctx workflow.Context, url string) (JobDetails, error) {
+func retrieveJobDetails(ctx workflow.Context, url string, idUser uint, idJobApplication uint) (JobDetails, error) {
 	// Scrape webpage with advanced mode (Serper)
 	var scrapeOutput map[string]interface{}
 	if err := workflow.ExecuteActivity(ctx, "ScrapeWebPage", map[string]interface{}{
@@ -426,10 +429,12 @@ func retrieveJobDetails(ctx workflow.Context, url string) (JobDetails, error) {
 	userPrompt := fmt.Sprintf("Scraped content:\n\n%s", scrapedData)
 
 	llmRequest := types.AIPIRequest{
-		SystemMessage:  systemPrompt,
-		UserMessage:    userPrompt,
-		Model:          "x-ai/grok-4.1-fast",
-		ResponseSchema: getJobDetailsResponseSchema(),
+		SystemMessage:    systemPrompt,
+		UserMessage:      userPrompt,
+		Model:            "x-ai/grok-4.1-fast",
+		ResponseSchema:   getJobDetailsResponseSchema(),
+		IdUser:           idUser,
+		IdJobApplication: &idJobApplication,
 	}
 
 	var llmResponse types.AIPIResponse

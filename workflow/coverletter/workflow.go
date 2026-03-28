@@ -99,7 +99,7 @@ func CoverLetterWorkflow(ctx workflow.Context, input CoverLetterWorkflowInput) (
 		return nil, fmt.Errorf("render user prompt: %w", err)
 	}
 
-	out, err := generateCoverLetter(ctx, systemPrompt, userPrompt)
+	out, err := generateCoverLetter(ctx, systemPrompt, userPrompt, input.IdUser, input.IdJobApplication)
 	if err != nil {
 		return nil, err
 	}
@@ -127,8 +127,8 @@ func executeTemplateToString(t *template.Template, data any) (string, error) {
 	return buf.String(), nil
 }
 
-func generateCoverLetter(ctx workflow.Context, systemPrompt, userPrompt string) (coverLetterLLMResponse, error) {
-	resp, err := callCoverLetterLLM(ctx, systemPrompt, userPrompt)
+func generateCoverLetter(ctx workflow.Context, systemPrompt, userPrompt string, idUser uint, idJobApplication uint) (coverLetterLLMResponse, error) {
+	resp, err := callCoverLetterLLM(ctx, systemPrompt, userPrompt, idUser, idJobApplication)
 	if err != nil {
 		return coverLetterLLMResponse{}, err
 	}
@@ -144,7 +144,7 @@ func generateCoverLetter(ctx workflow.Context, systemPrompt, userPrompt string) 
 		resp.CoverLetter,
 	)
 
-	resp2, err := callCoverLetterLLM(ctx, systemPrompt, repairUserPrompt)
+	resp2, err := callCoverLetterLLM(ctx, systemPrompt, repairUserPrompt, idUser, idJobApplication)
 	if err != nil {
 		return coverLetterLLMResponse{}, err
 	}
@@ -155,12 +155,14 @@ func generateCoverLetter(ctx workflow.Context, systemPrompt, userPrompt string) 
 	return resp2, nil
 }
 
-func callCoverLetterLLM(ctx workflow.Context, systemPrompt, userPrompt string) (coverLetterLLMResponse, error) {
+func callCoverLetterLLM(ctx workflow.Context, systemPrompt, userPrompt string, idUser uint, idJobApplication uint) (coverLetterLLMResponse, error) {
 	llmRequest := types.AIPIRequest{
-		SystemMessage:  systemPrompt,
-		UserMessage:    userPrompt,
-		Model:          "x-ai/grok-4.1-fast",
-		ResponseSchema: getCoverLetterResponseSchema(),
+		SystemMessage:    systemPrompt,
+		UserMessage:      userPrompt,
+		Model:            "x-ai/grok-4.1-fast",
+		ResponseSchema:   getCoverLetterResponseSchema(),
+		IdUser:           idUser,
+		IdJobApplication: &idJobApplication,
 	}
 
 	var llmResponse types.AIPIResponse

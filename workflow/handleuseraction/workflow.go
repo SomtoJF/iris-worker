@@ -68,7 +68,7 @@ func HandleUserActionWorkflow(ctx workflow.Context, input HandleUserActionWorkfl
 	}
 
 	// Call LLM to build the user action layout from the screenshot
-	layout, err := buildUserActionLayout(ctx, screenshot.Path, input.UserAction, input.ActionDetails)
+	layout, err := buildUserActionLayout(ctx, screenshot.Path, input.UserAction, input.ActionDetails, input.IdUser, input.IdJobApplication)
 	if err != nil {
 		logger.Error("Failed to build user action layout", "error", err)
 		return nil, err
@@ -153,7 +153,7 @@ func takeScreenshot(ctx workflow.Context, workflowID string) (browser.TakeScreen
 	return output, err
 }
 
-func buildUserActionLayout(ctx workflow.Context, screenshotPath string, userAction string, actionDetails string) (sqldb.UserActionLayout, error) {
+func buildUserActionLayout(ctx workflow.Context, screenshotPath string, userAction string, actionDetails string, idUser uint, idJobApplication uint) (sqldb.UserActionLayout, error) {
 	promptData := struct {
 		UserAction    string
 		ActionDetails string
@@ -173,11 +173,13 @@ func buildUserActionLayout(ctx workflow.Context, screenshotPath string, userActi
 	}
 
 	llmRequest := types.AIPIRequest{
-		SystemMessage:  buf.String(),
-		UserMessage:    "Analyze the screenshot and return the form layout as a JSON array.",
-		ImageUrl:       &screenshotBase64,
-		Model:          "x-ai/grok-4.1-fast",
-		ResponseSchema: getUserActionLayoutSchema(),
+		SystemMessage:    buf.String(),
+		UserMessage:      "Analyze the screenshot and return the form layout as a JSON array.",
+		ImageUrl:         &screenshotBase64,
+		Model:            "x-ai/grok-4.1-fast",
+		ResponseSchema:   getUserActionLayoutSchema(),
+		IdUser:           idUser,
+		IdJobApplication: &idJobApplication,
 	}
 
 	var llmResponse types.AIPIResponse

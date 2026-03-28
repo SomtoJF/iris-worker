@@ -12,8 +12,10 @@ import (
 )
 
 type SubmitApplicationWorkflowInput struct {
-	WorkflowID   string `json:"workflow_id"`
-	ElementIndex int    `json:"element_index"`
+	WorkflowID       string `json:"workflow_id"`
+	ElementIndex     int    `json:"element_index"`
+	IdUser           uint   `json:"id_user"`
+	IdJobApplication *uint  `json:"id_job_application,omitempty"`
 }
 
 type submitVerifyResponse struct {
@@ -70,7 +72,7 @@ func handleNetworkInterception(ctx workflow.Context, input SubmitApplicationWork
 	}
 
 	if hijackOutput.StatusCode >= 200 && hijackOutput.StatusCode < 300 {
-		success, err := verifyResponseWithLLM(ctx, hijackOutput.ResponseBody)
+		success, err := verifyResponseWithLLM(ctx, hijackOutput.ResponseBody, input.IdUser, input.IdJobApplication)
 		if err != nil {
 			return nil, fmt.Errorf("verify response with LLM: %w", err)
 		}
@@ -128,7 +130,7 @@ func handleFallbackDetection(ctx workflow.Context, input SubmitApplicationWorkfl
 	}, nil
 }
 
-func verifyResponseWithLLM(ctx workflow.Context, responseBody string) (bool, error) {
+func verifyResponseWithLLM(ctx workflow.Context, responseBody string, idUser uint, idJobApplication *uint) (bool, error) {
 	systemPrompt := "You are verifying whether an HTTP response indicates a successful job application submission. Analyze the response body and determine if the application was submitted successfully. An empty or null response body also indicates success (many servers return empty 200 responses on successful form submissions)."
 	userPrompt := fmt.Sprintf("HTTP Response Body:\n\n%s\n\nDoes this response indicate a successful job application submission?", responseBody)
 
@@ -137,10 +139,12 @@ func verifyResponseWithLLM(ctx workflow.Context, responseBody string) (bool, err
 	}
 
 	llmRequest := types.AIPIRequest{
-		SystemMessage:  systemPrompt,
-		UserMessage:    userPrompt,
-		Model:          "x-ai/grok-4.1-fast",
-		ResponseSchema: getVerifyResponseSchema(),
+		SystemMessage:    systemPrompt,
+		UserMessage:      userPrompt,
+		Model:            "x-ai/grok-4.1-fast",
+		ResponseSchema:   getVerifyResponseSchema(),
+		IdUser:           idUser,
+		IdJobApplication: idJobApplication,
 	}
 
 	var llmResponse types.AIPIResponse

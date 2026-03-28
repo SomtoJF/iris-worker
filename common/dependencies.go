@@ -77,7 +77,7 @@ func MakeDependencies() (Dependencies, error) {
 	s3Manager := s3pkg.NewS3Manager(s3Client, bucket)
 	return &dependencies{
 		db:            db,
-		aipiClient:    aipi.NewAIPIClient(openrouterClient),
+		aipiClient:    aipi.NewAIPIClient(openrouterClient, db),
 		browserClient: browserClient,
 		fs:            fs,
 		s3Manager:     s3Manager,
