@@ -149,7 +149,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		}
 
 		if plannerResponse.ToolCall != nil {
-			result := executeToolCall(sessionCtx, workflowId, input.IdUser, *plannerResponse.ToolCall)
+			result := executeToolCall(sessionCtx, workflowId, input.IdUser, input.IdJobApplication, *plannerResponse.ToolCall)
 			toolCallHistory = append(toolCallHistory, result)
 		}
 	}

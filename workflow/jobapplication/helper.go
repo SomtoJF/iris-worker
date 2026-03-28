@@ -319,7 +319,7 @@ func planNextAction(ctx workflow.Context, input PlannerRequest) (PlannerResponse
 	return plannerResponse, nil
 }
 
-func executeToolCall(ctx workflow.Context, workflowID string, userID uint, toolCall ToolCall) ToolCallResult {
+func executeToolCall(ctx workflow.Context, workflowID string, userID uint, idJobApplication uint, toolCall ToolCall) ToolCallResult {
 	toolItem, exists := toolItemMap[toolCall.Name]
 	if !exists {
 		return ToolCallResult{
@@ -330,6 +330,7 @@ func executeToolCall(ctx workflow.Context, workflowID string, userID uint, toolC
 
 	toolCall.Arguments["workflow_id"] = workflowID
 	toolCall.Arguments["user_id"] = userID
+	toolCall.Arguments["id_job_application"] = idJobApplication
 	resp := make(map[string]interface{})
 	var err error
 	if toolItem.IsWorkflow {
@@ -413,8 +414,10 @@ func retrieveJobDetails(ctx workflow.Context, url string, idUser uint, idJobAppl
 	// Scrape webpage with advanced mode (Serper)
 	var scrapeOutput map[string]interface{}
 	if err := workflow.ExecuteActivity(ctx, "ScrapeWebPage", map[string]interface{}{
-		"url":      url,
-		"advanced": "true",
+		"url":                url,
+		"advanced":           "true",
+		"id_user":            idUser,
+		"id_job_application": idJobApplication,
 	}).Get(ctx, &scrapeOutput); err != nil {
 		return JobDetails{}, err
 	}

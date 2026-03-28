@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -13,19 +14,24 @@ import (
 	"time"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
+	"github.com/SomtoJF/iris-worker/activity/sqldb"
 	"github.com/gocolly/colly/v2"
+	"gorm.io/gorm"
 )
 
-type Activity struct{}
+type Activity struct {
+	db *gorm.DB
+}
 
-func NewActivity() *Activity {
-	return &Activity{}
+func NewActivity(db *gorm.DB) *Activity {
+	return &Activity{db: db}
 }
 
 type ScrapeWebPageInput struct {
-	Url      string `json:"url"`
-	IdUser   uint   `json:"id_user"`
-	Advanced string `json:"advanced"`
+	Url              string `json:"url"`
+	IdUser           uint   `json:"id_user"`
+	IdJobApplication *uint  `json:"id_job_application,omitempty"`
+	Advanced         string `json:"advanced"`
 }
 
 type ScrapeWebPageOutput struct {
@@ -64,11 +70,27 @@ func (a *Activity) ScrapeWebPage(ctx context.Context, input ScrapeWebPageInput) 
 
 	select {
 	case result := <-resultChan:
+		if input.Advanced == "true" {
+			a.saveScrapesCostTracking(input)
+		}
 		return result, nil
 	case err := <-errChan:
 		return ScrapeWebPageOutput{}, err
 	case <-ctx.Done():
 		return ScrapeWebPageOutput{}, fmt.Errorf("scraping cancelled: %w", ctx.Err())
+	}
+}
+
+func (a *Activity) saveScrapesCostTracking(input ScrapeWebPageInput) {
+	record := sqldb.CostTracking{
+		IdUser:           input.IdUser,
+		IdJobApplication: input.IdJobApplication,
+		Type:             sqldb.CostTrackingTypeWebScraping,
+		OutputCost:       0.001,
+		TotalCost:        0.001,
+	}
+	if err := a.db.Create(&record).Error; err != nil {
+		log.Printf("failed to save scrape cost tracking record: %v", err)
 	}
 }
 

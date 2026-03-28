@@ -38,6 +38,7 @@ func (c *AIPIClient) saveCostTracking(req types.AIPIRequest, resp types.AIPIResp
 	record := sqldb.CostTracking{
 		IdUser:           req.IdUser,
 		IdJobApplication: req.IdJobApplication,
+		Type:             sqldb.CostTrackingTypeAIPI,
 		Model:            &resp.Model,
 		InputTokens:      &resp.InputTokens,
 		OutputTokens:     &resp.OutputTokens,

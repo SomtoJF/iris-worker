@@ -87,7 +87,7 @@ func registerJobApplicationActivities(w worker.Worker, dependencies common.Depen
 	browserActivities := browser.NewActivities(browserClient)
 	w.RegisterActivity(browserActivities)
 
-	webActivities := web.NewActivity()
+	webActivities := web.NewActivity(db)
 	w.RegisterActivity(webActivities)
 
 	s3Activity := s3Activities.NewActivity(s3Manager)
