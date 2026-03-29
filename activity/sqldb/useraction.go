@@ -67,6 +67,7 @@ type UserAction struct {
 	ActionDetails    string           `gorm:"type:text;not null" json:"action_details"`
 	UserActionLayout UserActionLayout `gorm:"type:jsonb;not null" json:"user_action_layout"`
 	IsPending        bool             `gorm:"default:true" json:"is_pending"`
+	WorkflowID       string           `gorm:"type:text;not null" json:"workflow_id"`
 	CreatedAt        time.Time        `gorm:"default:CURRENT_TIMESTAMP" json:"created_at"`
 	UpdatedAt        time.Time        `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime" json:"updated_at"`
 }
@@ -78,6 +79,7 @@ func (UserAction) TableName() string {
 // ====== ACTIVITIES ======
 
 type CreateUserActionInput struct {
+	WorkflowID       string           `json:"workflow_id"`
 	IdUser           uint             `json:"id_user"`
 	IdJobApplication uint             `json:"id_job_application"`
 	UserActionType   string           `json:"user_action_type"`
@@ -87,6 +89,7 @@ type CreateUserActionInput struct {
 
 func (a *Activity) CreateUserAction(ctx context.Context, input CreateUserActionInput) (UserAction, error) {
 	record := UserAction{
+		WorkflowID:       input.WorkflowID,
 		IdUser:           input.IdUser,
 		IdJobApplication: input.IdJobApplication,
 		UserActionType:   input.UserActionType,

@@ -80,6 +80,7 @@ func HandleUserActionWorkflow(ctx workflow.Context, input HandleUserActionWorkfl
 		IdJobApplication: input.IdJobApplication,
 		UserActionType:   input.UserAction,
 		ActionDetails:    input.ActionDetails,
+		WorkflowID:       input.WorkflowID,
 		Layout:           layout,
 	})
 	if err != nil {
@@ -96,15 +97,15 @@ func HandleUserActionWorkflow(ctx workflow.Context, input HandleUserActionWorkfl
 
 	// Notify user
 	if err := notifyUser(ctx, input.IdUser, notifyUserInput{
-		UserActionID:    userAction.IdUserAction,
-		UserActionType:  input.UserAction,
-		ActionDetails:   input.ActionDetails,
-		Layout:          layout,
-		WorkflowID:      childWorkflowID,
-		SignalName:      signalName,
-		JobTitle:        jobApplication.JobTitle,
-		CompanyName:     jobApplication.CompanyName,
-		ApplicationID:   jobApplication.IdExternal.String(),
+		UserActionID:   userAction.IdUserAction,
+		UserActionType: input.UserAction,
+		ActionDetails:  input.ActionDetails,
+		Layout:         layout,
+		WorkflowID:     childWorkflowID,
+		SignalName:     signalName,
+		JobTitle:       jobApplication.JobTitle,
+		CompanyName:    jobApplication.CompanyName,
+		ApplicationID:  jobApplication.IdExternal.String(),
 	}); err != nil {
 		logger.Error("Failed to notify user", "error", err)
 		return nil, err
