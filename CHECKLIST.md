@@ -19,7 +19,7 @@
 - [ x ] Figure out how to detect form/application submissions to end the application process
 - [ x ] Investigate Nil values being passed for combobox inputs when they do have values
 - [ x ] Investigate Nil checkbox inputs
-- [ ] Design and wire in User Input Required for OTP (greenhouse)
+- [ x ] Design and wire in User Input Required for OTP (greenhouse)
 - [ x ] Wire in cost monitoring
 - [ ] Migrate to postgres
 - [ ] Figure out captcha avoidance
