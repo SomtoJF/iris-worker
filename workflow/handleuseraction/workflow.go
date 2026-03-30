@@ -80,7 +80,7 @@ func HandleUserActionWorkflow(ctx workflow.Context, input HandleUserActionWorkfl
 		IdJobApplication: input.IdJobApplication,
 		UserActionType:   input.UserAction,
 		ActionDetails:    input.ActionDetails,
-		WorkflowID:       input.WorkflowID,
+		WorkflowID:       childWorkflowID,
 		Layout:           layout,
 	})
 	if err != nil {

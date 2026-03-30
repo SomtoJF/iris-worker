@@ -143,7 +143,7 @@ func (a *Activity) Type(ctx context.Context, input TypeInput) error {
 	return a.typeSingleField(page, FieldInput{
 		ElementIndex: input.ElementIndex,
 		Text:         input.Text,
-		Replace:      input.Replace,
+		Replace:      true,
 	})
 }
 
@@ -162,6 +162,8 @@ func (a *Activity) TypeMultiple(ctx context.Context, input TypeMultipleInput) er
 
 	var errorMessages []string
 	for i, field := range input.Fields {
+		// Always replace current text with new text
+		field.Replace = true
 		if err := a.typeSingleField(page, field); err != nil {
 			errorMessages = append(errorMessages,
 				fmt.Sprintf("field %d (index %d): %s", i, field.ElementIndex, err.Error()))
