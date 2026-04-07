@@ -54,7 +54,7 @@ type PlannerRequest struct {
 	TaggedNodes             []browserfactory.SerializableTaggedNode          `json:"tagged_nodes"`
 	TaggedFileInputElements []browserfactory.SerializableTaggedFileInputNode `json:"tagged_file_input_elements"`
 	ToolCallHistory         []ToolCallResult                                 `json:"tool_call_history"`
-	UserProfile             UserProfile                                      `json:"user_profile"`
+	UserProfileJSON         string                                           `json:"user_profile"`
 }
 
 type ToolItem struct {

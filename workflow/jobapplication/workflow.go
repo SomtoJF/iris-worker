@@ -1,6 +1,7 @@
 package jobapplication
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -106,6 +107,14 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		})
 	}()
 
+	userProfileBytes, err := json.Marshal(userProfile)
+	if err != nil {
+		logger.Error("Failed to marshal user profile", "error", err)
+		handleApplicationError(ctx, input, jobDetails)
+		return err
+	}
+	userProfileJSON := string(userProfileBytes)
+
 	isApplicationComplete := false
 	toolCallHistory := []ToolCallResult{}
 	const maxAgentIterations = 20
@@ -133,7 +142,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 			UserResume:              userResume.Content,
 			JobDescription:          jobDetails.JobDescription,
 			UserResumePath:          resumePath,
-			UserProfile:             userProfile,
+			UserProfileJSON:         userProfileJSON,
 		}
 
 		plannerResponse, err := planNextAction(ctx, plannerRequest)
@@ -229,6 +238,10 @@ type UserProfile struct {
 	Gender                 string   `json:"gender"`
 	DateOfBirth            string   `json:"date_of_birth"`
 	Age                    int      `json:"age"`
+	SalaryMin              *float64 `json:"salary_min,omitempty"`
+	SalaryMax              *float64 `json:"salary_max,omitempty"`
+	SalaryCurrency         string   `json:"salary_currency,omitempty"`
+	Ethnicity              string   `json:"ethnicity,omitempty"`
 }
 
 func fetchJobApplicationProfile(ctx workflow.Context, idUser uint) (UserProfile, error) {
@@ -252,5 +265,9 @@ func fetchJobApplicationProfile(ctx workflow.Context, idUser uint) (UserProfile,
 		Gender:                 jobApplicationProfile.Gender,
 		DateOfBirth:            jobApplicationProfile.DateOfBirth.Format("2006-01-02"),
 		Age:                    age,
+		SalaryMin:              jobApplicationProfile.SalaryMin,
+		SalaryMax:              jobApplicationProfile.SalaryMax,
+		SalaryCurrency:         jobApplicationProfile.SalaryCurrency,
+		Ethnicity:              jobApplicationProfile.Ethnicity,
 	}, nil
 }

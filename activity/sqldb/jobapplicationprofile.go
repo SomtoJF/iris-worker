@@ -24,6 +24,10 @@ type JobApplicationProfile struct {
 	CountriesOfCitizenship  []string   `json:"countries_of_citizenship" gorm:"type:text;serializer:json"`
 	Gender                  string     `json:"gender"`
 	DateOfBirth             time.Time  `json:"date_of_birth"`
+	SalaryMin               *float64   `json:"salary_min" gorm:"default:NULL"`
+	SalaryMax               *float64   `json:"salary_max" gorm:"default:NULL"`
+	SalaryCurrency          string     `json:"salary_currency"`
+	Ethnicity               string     `json:"ethnicity"`
 	CreatedAt               time.Time  `gorm:"default:CURRENT_TIMESTAMP"`
 	UpdatedAt               time.Time  `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime"`
 	DeletedAt               *time.Time `gorm:"index;default:NULL"`
