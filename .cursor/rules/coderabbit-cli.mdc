@@ -1,0 +1,23 @@
+---
+description: Run CodeRabbit CLI for code review with agent mode and a 3-run cap
+alwaysApply: true
+---
+
+# CodeRabbit CLI
+
+Use CodeRabbit from the terminal to review changes. It is installed as `coderabbit` and `cr`; run `cr -h` (or `coderabbit -h`) for available commands.
+
+## Default invocation
+
+- Prefer the **`--agent`** flag so output suits an AI coding agent.
+- For **uncommitted** changes (typical workflow):
+
+```bash
+coderabbit --agent -t uncommitted
+```
+
+Adjust targets (`-t`) when reviewing something other than the working tree, per `cr -h`.
+
+## Frequency cap
+
+**Do not run CodeRabbit more than three times for the same set of changes.** If a third run already happened, summarize or apply fixes without invoking the CLI again until the change set meaningfully updates.
