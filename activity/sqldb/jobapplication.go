@@ -34,12 +34,14 @@ const (
 
 type JobApplication struct {
 	IdJobApplication uint                 `gorm:"primaryKey;autoIncrement;column:id_job_application" json:"_"`
-	IdExternal       uuid.UUID            `gorm:"type:text;not null;unique" json:"id"`
+	IdExternal       uuid.UUID            `gorm:"unique;type:uuid;default:gen_random_uuid()" json:"id"`
+	UserId           uint                 `gorm:"column:id_user;not null;uniqueIndex:idx_job_application_url_user"`
+	User             User                 `gorm:"foreignKey:UserId;references:IdUser"`
 	Status           JobApplicationStatus `gorm:"type:varchar(50);not null"`
-	Url              string               `gorm:"not null;unique"`
-	JobTitle         string               `gorm:"column:job_title" json:"job_title"`
-	CompanyName      string               `gorm:"column:company_name" json:"company_name"`
-	JobDescription   string               `gorm:"column:job_description" json:"job_description"`
+	JobTitle         string               `gorm:"type:varchar(255);not null"`
+	CompanyName      string               `gorm:"type:varchar(255);not null"`
+	JobDescription   string               `gorm:"type:text;not null"`
+	Url              string               `gorm:"not null;uniqueIndex:idx_job_application_url_user"`
 	CreatedAt        time.Time            `gorm:"default:CURRENT_TIMESTAMP"`
 	UpdatedAt        time.Time            `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime"`
 	DeletedAt        *time.Time           `gorm:"index;default:NULL"`

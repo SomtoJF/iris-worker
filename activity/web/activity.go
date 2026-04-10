@@ -83,8 +83,8 @@ func (a *Activity) ScrapeWebPage(ctx context.Context, input ScrapeWebPageInput) 
 
 func (a *Activity) saveScrapesCostTracking(input ScrapeWebPageInput) {
 	record := sqldb.CostTracking{
-		IdUser:           input.IdUser,
-		IdJobApplication: input.IdJobApplication,
+		UserId:           input.IdUser,
+		JobApplicationId: input.IdJobApplication,
 		Type:             sqldb.CostTrackingTypeWebScraping,
 		OutputCost:       0.001,
 		TotalCost:        0.001,

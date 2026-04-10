@@ -4,9 +4,9 @@ import (
 	"context"
 	"log"
 
+	"github.com/SomtoJF/iris-worker/activity/sqldb"
 	localOpenRouter "github.com/SomtoJF/iris-worker/aipi/openrouter"
 	"github.com/SomtoJF/iris-worker/aipi/types"
-	"github.com/SomtoJF/iris-worker/activity/sqldb"
 	openrouter "github.com/revrost/go-openrouter"
 	"gorm.io/gorm"
 )
@@ -36,8 +36,8 @@ func (c *AIPIClient) GetCompletion(ctx context.Context, req types.AIPIRequest) (
 
 func (c *AIPIClient) saveCostTracking(req types.AIPIRequest, resp types.AIPIResponse) {
 	record := sqldb.CostTracking{
-		IdUser:           req.IdUser,
-		IdJobApplication: req.IdJobApplication,
+		UserId:           req.IdUser,
+		JobApplicationId: req.IdJobApplication,
 		Type:             sqldb.CostTrackingTypeAIPI,
 		Model:            &resp.Model,
 		InputTokens:      &resp.InputTokens,

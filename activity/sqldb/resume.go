@@ -9,7 +9,7 @@ import (
 
 type Resume struct {
 	IdResume   uint      `gorm:"primaryKey;autoIncrement;column:id_resume" json:"_"`
-	IdExternal uuid.UUID `gorm:"type:text;not null;unique" json:"id"`
+	IdExternal uuid.UUID `gorm:"unique;type:uuid;default:gen_random_uuid()" json:"id"`
 	// Either url of filepath
 	UserId       uint       `gorm:"column:id_user;not null"`
 	User         User       `gorm:"foreignKey:UserId;references:IdUser"`

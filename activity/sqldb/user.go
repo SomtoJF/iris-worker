@@ -9,7 +9,7 @@ import (
 
 type User struct {
 	IdUser                uint                  `gorm:"primaryKey;autoIncrement;column:id_user" json:"_"`
-	IdExternal            uuid.UUID             `gorm:"type:text;not null;unique" json:"id"`
+	IdExternal            uuid.UUID             `gorm:"unique;type:uuid;default:gen_random_uuid()" json:"id"`
 	JobApplicationProfile JobApplicationProfile `gorm:"foreignKey:UserId;references:IdUser"`
 	FirstName             string                `gorm:"not null"`
 	LastName              string                `gorm:"not null"`

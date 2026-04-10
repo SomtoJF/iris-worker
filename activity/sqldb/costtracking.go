@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 type CostTrackingType string
@@ -18,10 +17,11 @@ const (
 
 type CostTracking struct {
 	ID               uint             `gorm:"primaryKey;autoIncrement;column:id" json:"_"`
-	IdExternal       uuid.UUID        `gorm:"type:text;not null;unique" json:"id"`
-	IdUser           uint             `gorm:"not null" json:"id_user"`
-	User             User             `gorm:"foreignKey:IdUser;references:IdUser"`
-	IdJobApplication *uint            `json:"id_job_application"`
+	IdExternal       uuid.UUID        `gorm:"unique;type:uuid;default:gen_random_uuid()" json:"id"`
+	UserId           uint             `gorm:"column:id_user;not null" json:"id_user"`
+	User             User             `gorm:"foreignKey:UserId;references:IdUser"`
+	JobApplicationId *uint            `gorm:"column:id_job_application;not null" json:"id_job_application"`
+	JobApplication   *JobApplication  `gorm:"foreignKey:JobApplicationId;references:IdJobApplication"`
 	Type             CostTrackingType `gorm:"type:text" json:"type"`
 	Model            *string          `json:"model"`
 	InputTokens      *int             `json:"input_tokens"`
@@ -35,11 +35,4 @@ type CostTracking struct {
 
 func (CostTracking) TableName() string {
 	return "cost_tracking"
-}
-
-func (c *CostTracking) BeforeCreate(tx *gorm.DB) error {
-	if c.IdExternal == uuid.Nil {
-		c.IdExternal = uuid.New()
-	}
-	return nil
 }

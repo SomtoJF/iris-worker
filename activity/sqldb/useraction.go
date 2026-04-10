@@ -5,6 +5,8 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // ====== TYPES ======
@@ -60,16 +62,19 @@ func (u UserActionLayout) Value() (driver.Value, error) {
 // ====== MODEL ======
 
 type UserAction struct {
-	IdUserAction     uint             `gorm:"primaryKey;autoIncrement;column:id_user_action" json:"id_user_action"`
-	IdUser           uint             `gorm:"column:id_user;not null" json:"id_user"`
-	IdJobApplication uint             `gorm:"column:id_job_application;not null" json:"id_job_application"`
-	UserActionType   string           `gorm:"type:text;not null" json:"user_action_type"`
-	ActionDetails    string           `gorm:"type:text;not null" json:"action_details"`
-	UserActionLayout UserActionLayout `gorm:"type:jsonb;not null" json:"user_action_layout"`
-	IsPending        bool             `gorm:"default:true" json:"is_pending"`
-	WorkflowID       string           `gorm:"type:text;not null" json:"workflow_id"`
-	CreatedAt        time.Time        `gorm:"default:CURRENT_TIMESTAMP" json:"created_at"`
-	UpdatedAt        time.Time        `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime" json:"updated_at"`
+	IdUserAction     uint             `gorm:"primaryKey;autoIncrement;column:id_user_action" json:"_"`
+	IdExternal       uuid.UUID        `gorm:"unique;type:uuid;default:gen_random_uuid()" json:"id"`
+	UserId           uint             `gorm:"column:id_user;not null"`
+	User             User             `gorm:"foreignKey:UserId;references:IdUser"`
+	JobApplicationId uint             `gorm:"column:id_job_application;not null"`
+	JobApplication   JobApplication   `gorm:"foreignKey:JobApplicationId;references:IdJobApplication"`
+	UserActionType   string           `gorm:"type:text;not null"`
+	ActionDetails    string           `gorm:"type:text;not null"`
+	UserActionLayout UserActionLayout `gorm:"type:jsonb;not null"`
+	WorkflowID       string           `gorm:"type:text"`
+	IsPending        bool             `gorm:"default:true"`
+	CreatedAt        time.Time        `gorm:"default:CURRENT_TIMESTAMP"`
+	UpdatedAt        time.Time        `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime"`
 }
 
 func (UserAction) TableName() string {
@@ -80,8 +85,8 @@ func (UserAction) TableName() string {
 
 type CreateUserActionInput struct {
 	WorkflowID       string           `json:"workflow_id"`
-	IdUser           uint             `json:"id_user"`
-	IdJobApplication uint             `json:"id_job_application"`
+	UserId           uint             `json:"id_user"`
+	JobApplicationId uint             `json:"id_job_application"`
 	UserActionType   string           `json:"user_action_type"`
 	ActionDetails    string           `json:"action_details"`
 	Layout           UserActionLayout `json:"layout"`
@@ -90,8 +95,8 @@ type CreateUserActionInput struct {
 func (a *Activity) CreateUserAction(ctx context.Context, input CreateUserActionInput) (UserAction, error) {
 	record := UserAction{
 		WorkflowID:       input.WorkflowID,
-		IdUser:           input.IdUser,
-		IdJobApplication: input.IdJobApplication,
+		UserId:           input.UserId,
+		JobApplicationId: input.JobApplicationId,
 		UserActionType:   input.UserActionType,
 		ActionDetails:    input.ActionDetails,
 		UserActionLayout: input.Layout,

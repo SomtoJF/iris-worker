@@ -5,32 +5,33 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 type JobApplicationProfile struct {
-	IdJobApplicationProfile uint       `gorm:"primaryKey;autoIncrement;column:id_job_application_profile" json:"_"`
-	IdExternal              uuid.UUID  `gorm:"type:text;not null;unique" json:"id"`
-	UserId                  uint       `gorm:"column:id_user;not null;uniqueIndex"`
-	FirstName               string     `json:"first_name" gorm:"not null"`
-	LastName                string     `json:"last_name" gorm:"not null"`
-	Email                   string     `json:"email" gorm:"not null"`
-	Phone                   string     `json:"phone"`
-	Address                 string     `json:"address"`
-	City                    string     `json:"city"`
-	State                   string     `json:"state"`
-	Zip                     string     `json:"zip"`
-	CountryOfResidence      string     `json:"country_of_residence"`
-	IsVeteran               bool       `json:"is_veteran"`
-	CountriesOfCitizenship  []string   `json:"countries_of_citizenship" gorm:"type:text;serializer:json"`
-	Gender                  string     `json:"gender"`
-	DateOfBirth             time.Time  `json:"date_of_birth"`
-	SalaryMin               *float64   `json:"salary_min" gorm:"default:NULL"`
-	SalaryMax               *float64   `json:"salary_max" gorm:"default:NULL"`
-	SalaryCurrency          string     `json:"salary_currency"`
-	Ethnicity               string     `json:"ethnicity"`
-	CreatedAt               time.Time  `gorm:"default:CURRENT_TIMESTAMP"`
-	UpdatedAt               time.Time  `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime"`
-	DeletedAt               *time.Time `gorm:"index;default:NULL"`
+	IdJobApplicationProfile uint           `gorm:"primaryKey;autoIncrement;column:id_job_application_profile" json:"_"`
+	IdExternal              uuid.UUID      `gorm:"unique;type:uuid;default:gen_random_uuid()" json:"id"`
+	UserId                  uint           `gorm:"column:id_user;not null;uniqueIndex"`
+	FirstName               string         `json:"first_name" gorm:"not null"`
+	LastName                string         `json:"last_name" gorm:"not null"`
+	Email                   string         `json:"email" gorm:"not null"`
+	Phone                   string         `json:"phone"`
+	Address                 string         `json:"address"`
+	City                    string         `json:"city"`
+	State                   string         `json:"state"`
+	Zip                     string         `json:"zip"`
+	CountryOfResidence      string         `json:"country_of_residence"`
+	IsVeteran               bool           `json:"is_veteran"`
+	CountriesOfCitizenship  pq.StringArray `json:"countries_of_citizenship" gorm:"type:text[]"`
+	Gender                  string         `json:"gender"`
+	DateOfBirth             time.Time      `json:"date_of_birth"`
+	SalaryMin               *float64       `json:"salary_min" gorm:"default:NULL"`
+	SalaryMax               *float64       `json:"salary_max" gorm:"default:NULL"`
+	SalaryCurrency          string         `json:"salary_currency"`
+	Ethnicity               string         `json:"ethnicity"`
+	CreatedAt               time.Time      `gorm:"default:CURRENT_TIMESTAMP"`
+	UpdatedAt               time.Time      `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime"`
+	DeletedAt               *time.Time     `gorm:"index;default:NULL"`
 }
 
 func (JobApplicationProfile) TableName() string {

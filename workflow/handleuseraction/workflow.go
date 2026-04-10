@@ -76,8 +76,8 @@ func HandleUserActionWorkflow(ctx workflow.Context, input HandleUserActionWorkfl
 
 	// Create user action record in DB
 	userAction, err := createUserAction(ctx, sqldb.CreateUserActionInput{
-		IdUser:           input.IdUser,
-		IdJobApplication: input.IdJobApplication,
+		UserId:           input.IdUser,
+		JobApplicationId: input.IdJobApplication,
 		UserActionType:   input.UserAction,
 		ActionDetails:    input.ActionDetails,
 		WorkflowID:       childWorkflowID,
