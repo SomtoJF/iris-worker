@@ -22,7 +22,7 @@ services:
       - POSTGRES_USER=temporal
       - POSTGRES_PWD=temporal
       - POSTGRES_SEEDS=postgresql
-      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+      # - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
       - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_CLI_ADDRESS=temporal:7233
     image: temporalio/auto-setup:1.27.2
@@ -31,7 +31,7 @@ services:
     ports:
       - 7233:7233
     volumes:
-      - ./dynamicconfig:/etc/temporal/config/dynamicconfig
+      # - ./dynamicconfig:/etc/temporal/config/dynamicconfig
   temporal-admin-tools:
     container_name: iris-temporal-admin-tools
     depends_on:
