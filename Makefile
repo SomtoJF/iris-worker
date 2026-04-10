@@ -13,10 +13,11 @@ docker-build:
 
 docker-run:
 	docker run --rm \
-		--add-host=host.docker.internal:host-gateway \
-		-e RENDER=true \
-		-e REDIS_HOST=$(or $(REDIS_HOST),host.docker.internal:6379) \
-		iris-worker:local
+  --add-host=host.docker.internal:host-gateway \
+  --env-file .env \
+  -e RENDER=true \
+  -e REDIS_HOST=host.docker.internal:6379 \
+  iris-worker:local
 
 # Linux: Temporal/Redis on localhost. Docker Desktop on Mac does not support host networking.
 docker-run-host:

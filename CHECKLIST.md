@@ -21,7 +21,7 @@
 - [ x ] Investigate Nil checkbox inputs
 - [ x ] Design and wire in User Input Required for OTP (greenhouse)
 - [ x ] Wire in cost monitoring
-- [ ] Migrate to postgres
+- [ x ] Migrate to postgres
 - [ ] Figure out captcha avoidance
 - [ ] Research the best and cheapest google job search tool
 - [ ] Implement job search
