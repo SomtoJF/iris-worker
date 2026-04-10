@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"os"
 
 	"github.com/SomtoJF/iris-worker/activity/browser"
 	"github.com/SomtoJF/iris-worker/activity/llm"
@@ -40,7 +41,14 @@ func main() {
 	}
 	defer dependencies.Cleanup()
 
-	c, err := client.Dial(client.Options{})
+	temporalHost := os.Getenv("TEMPORAL_HOST")
+	if temporalHost == "" {
+		temporalHost = "localhost:7233"
+	}
+
+	c, err := client.Dial(client.Options{
+		HostPort: temporalHost,
+	})
 
 	if err != nil {
 		log.Fatalln("Unable to create Temporal client:", err)
