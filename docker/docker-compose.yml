@@ -30,8 +30,8 @@ services:
       - temporal-network
     ports:
       - 7233:7233
-    volumes:
-      # - ./dynamicconfig:/etc/temporal/config/dynamicconfig
+    # volumes:
+    # - ./dynamicconfig:/etc/temporal/config/dynamicconfig
   temporal-admin-tools:
     container_name: iris-temporal-admin-tools
     depends_on:
