@@ -51,7 +51,7 @@ func (d *dependencies) Cleanup() {
 }
 
 func MakeDependencies() (Dependencies, error) {
-	db, err := sqldb.ConnectToSQLite()
+	db, err := sqldb.ConnectToPostgres()
 	if err != nil {
 		return nil, fmt.Errorf("sqldb: %w", err)
 	}
