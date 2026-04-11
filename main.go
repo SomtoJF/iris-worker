@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"os"
 
 	"github.com/SomtoJF/iris-worker/activity/browser"
 	"github.com/SomtoJF/iris-worker/activity/llm"
@@ -17,7 +16,6 @@ import (
 	"github.com/SomtoJF/iris-worker/workflow/jobapplication"
 	"github.com/SomtoJF/iris-worker/workflow/processresume"
 	"github.com/SomtoJF/iris-worker/workflow/submitapplication"
-	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 )
 
@@ -41,24 +39,11 @@ func main() {
 	}
 	defer dependencies.Cleanup()
 
-	temporalHost := os.Getenv("TEMPORAL_HOST")
-	if temporalHost == "" {
-		temporalHost = "localhost:7233"
-	}
-
-	c, err := client.Dial(client.Options{
-		HostPort: temporalHost,
-	})
-
-	if err != nil {
-		log.Fatalln("Unable to create Temporal client:", err)
-	}
-
-	defer c.Close()
+	temporalClient := dependencies.GetTemporalClient()
 
 	loadTemplates()
 
-	w := worker.New(c, string(JobApplicationTaskQueueName), worker.Options{
+	w := worker.New(temporalClient, string(JobApplicationTaskQueueName), worker.Options{
 		EnableSessionWorker: true,
 	})
 
@@ -68,7 +53,7 @@ func main() {
 	// Start listening to the Task Queue.
 	err = w.Run(worker.InterruptCh())
 	if err != nil {
-		log.Fatalln("unable to start Worker", err)
+		log.Fatalln("worker failed: ", err)
 	}
 }
 
