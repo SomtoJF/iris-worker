@@ -48,6 +48,7 @@ RUN useradd --create-home --home-dir /app --shell /usr/sbin/nologin --uid 1000 a
 WORKDIR /app
 
 COPY --from=builder /out/iris-worker /app/iris-worker
+COPY --from=builder /src/workflow /app/workflow
 
 RUN mkdir -p /app/iris/db && chown -R appuser:appuser /app
 
@@ -55,6 +56,7 @@ USER appuser
 
 ENV HOME=/app
 ENV RENDER=true
+ENV WORKER_ROOT=/app
 
 # Point Rod at system Chromium (defaults already enable headless + no-sandbox when running in a container).
 CMD ["/app/iris-worker", "-rod=bin=/usr/bin/chromium"]
