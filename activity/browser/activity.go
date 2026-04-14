@@ -308,7 +308,7 @@ func (a *Activity) GetFormAction(ctx context.Context, input GetFormActionInput) 
 
 	currentURL := page.MustInfo().URL
 
-	form, err := page.Element("form")
+	form, err := page.Timeout(5 * time.Second).Element("form")
 	if err != nil {
 		return GetFormActionOutput{CurrentURL: currentURL}, nil
 	}

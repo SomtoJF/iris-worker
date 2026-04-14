@@ -23,6 +23,7 @@
 - [ x ] Wire in cost monitoring
 - [ x ] Migrate to postgres
 - [ x ] Deploy Iris
+- [ ] Collect additional data. Languages and fluency levels, portfolio link
 - [ ] Figure out captcha solving
 - [ ] Research the best and cheapest google job search tool
 - [ ] Implement built-in job search
