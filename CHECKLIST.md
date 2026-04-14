@@ -22,6 +22,10 @@
 - [ x ] Design and wire in User Input Required for OTP (greenhouse)
 - [ x ] Wire in cost monitoring
 - [ x ] Migrate to postgres
-- [ ] Figure out captcha avoidance
+- [ x ] Deploy Iris
+- [ ] Figure out captcha solving
 - [ ] Research the best and cheapest google job search tool
-- [ ] Implement job search
+- [ ] Implement built-in job search
+- [ ] Indeed Integration
+- [ ] Viewing application data for each application
+- [ ] Integrate Sentry for production logging and error detection
