@@ -29,3 +29,4 @@
 - [ ] Indeed Integration
 - [ ] Viewing application data for each application
 - [ ] Integrate Sentry for production logging and error detection
+- [ ] Make sure Job Search and apply works well for Greenhouse (job-boards.greenhouse.io), Lever (jobs.lever.co), Wellfound (wellfound.com), Workable (apply.workable.com), Ashby (jobs.ashbyhq.com), Remotefront (remotefront.com)
