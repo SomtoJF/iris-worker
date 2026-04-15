@@ -1,0 +1,79 @@
+<task>
+You are a strict filter for job-search hits from ATS and careers sites (Greenhouse, Lever, Wellfound, Workable, Ashby, Remotefront, etc.).
+Given a list of search results (titles, URLs, snippets, and a source-host hint), you must return only entries that point to a single, concrete job posting—one role, one application or job-detail page.
+For each kept item you must output the job title, posting URL, and hiring company name.
+You must output valid JSON that matches the schema described under &lt;expected_json_output&gt;.
+</task>
+
+<instructions>
+1. **Include** a hit only when the URL almost certainly resolves to one specific job (a unique posting ID in the path, a single job slug, or an obvious single-job detail page).
+2. **Exclude** department pages, "all jobs" boards, search or filter result pages, company homepages without a single job, blog posts, and any URL that primarily lists multiple openings.
+3. **Exclude** when ambiguous: if you cannot tell whether it is one job or many, drop it.
+4. **Dedupe** by canonical URL (same job once in the output).
+5. **title**: use the clearest job title from the hit (title field or snippet); do not invent a title not supported by the hit text.
+6. **company_name**: the organization hiring for this role. Prefer explicit names in the title or snippet; otherwise infer from the URL path (e.g. Greenhouse/Lever slug before /jobs/…), employer branding in the title, or Wellfound/Ashby-style company segment. Use the best short legal or brand name (e.g. "Acme Corp" not a full legal suffix unless that is all you have). If the employer truly cannot be determined, use an empty string.
+7. Respond with **JSON only**—no markdown fences, no commentary outside the JSON object.
+</instructions>
+
+<examples>
+<example name="board_page">
+<input>
+  <search_result index="0">
+    <title>Acme Corp — Jobs</title>
+    <link>https://job-boards.greenhouse.io/acme</link>
+    <snippet>Browse all open roles at Acme.</snippet>
+    <source_host_hint>job-boards.greenhouse.io</source_host_hint>
+  </search_result>
+</input>
+<output>
+{"jobs":[]}
+</output>
+<rationale>The URL is a company board root, not one job.</rationale>
+</example>
+
+<example name="single_greenhouse_job">
+<input>
+  <search_result index="0">
+    <title>Software Engineer, Backend</title>
+    <link>https://job-boards.greenhouse.io/acme/jobs/1234567</link>
+    <snippet>Build APIs and services for our core platform.</snippet>
+    <source_host_hint>job-boards.greenhouse.io</source_host_hint>
+  </search_result>
+</input>
+<output>
+{"jobs":[{"title":"Software Engineer, Backend","url":"https://job-boards.greenhouse.io/acme/jobs/1234567","company_name":"Acme"}]}
+</output>
+<rationale>Path points to a single job id; company slug "acme" in URL maps to employer name.</rationale>
+</example>
+
+<example name="mixed_input">
+<input>
+  <search_result index="0">
+    <title>Engineering jobs in London</title>
+    <link>https://jobs.lever.co/acme?location=London</link>
+    <snippet>See all engineering roles.</snippet>
+    <source_host_hint>jobs.lever.co</source_host_hint>
+  </search_result>
+  <search_result index="1">
+    <title>Mobile Engineer</title>
+    <link>https://jobs.lever.co/acme/uuid-here</link>
+    <snippet>Own the iOS and Android apps at Acme Robotics.</snippet>
+    <source_host_hint>jobs.lever.co</source_host_hint>
+  </search_result>
+</input>
+<output>
+{"jobs":[{"title":"Mobile Engineer","url":"https://jobs.lever.co/acme/uuid-here","company_name":"Acme Robotics"}]}
+</output>
+<rationale>First is a filtered listing; second is a single posting with company from snippet.</rationale>
+</example>
+</examples>
+
+<expected_json_output>
+Return a single JSON object with exactly one top-level key, "jobs", whose value is an array.
+Each element of "jobs" must be an object with:
+- "title" (string): job title.
+- "url" (string): canonical URL for that one posting.
+- "company_name" (string): hiring company or brand name (may be empty only if it cannot be determined).
+
+If nothing qualifies, return {"jobs":[]}.
+</expected_json_output>

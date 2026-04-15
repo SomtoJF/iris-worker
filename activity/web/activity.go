@@ -180,6 +180,147 @@ func scrapeWithColly(targetURL, domain string) (ScrapeWebPageOutput, error) {
 	}, nil
 }
 
+// WebSearchInput is sent to Serper's Google Search API. Query must be the Google q string
+// (e.g. site:host keywords) without date-range text; DateCutoff is mapped to tbs inside the activity.
+// Location: ISO 3166-1 alpha-2 (e.g. ng) sets gl; otherwise it is appended to q for regional context.
+type WebSearchInput struct {
+	Query      string `json:"query"`
+	Location   string `json:"location"`
+	DateCutoff string `json:"date_cutoff"`
+}
+
+type SerperOrganicResult struct {
+	Title   string `json:"title"`
+	Link    string `json:"link"`
+	Snippet string `json:"snippet"`
+	Date    string `json:"date"`
+}
+
+type WebSearchOutput struct {
+	Organic []SerperOrganicResult `json:"organic"`
+	RawJSON string                `json:"raw_json,omitempty"`
+}
+
+type serperGoogleSearchRequest struct {
+	Q   string `json:"q"`
+	Gl  string `json:"gl,omitempty"`
+	Tbs string `json:"tbs,omitempty"`
+}
+
+type serperGoogleSearchResponse struct {
+	Organic []SerperOrganicResult `json:"organic"`
+}
+
+func (a *Activity) WebSearch(ctx context.Context, input WebSearchInput) (WebSearchOutput, error) {
+	apiKey := os.Getenv("SERPER_API_KEY")
+	if apiKey == "" {
+		return WebSearchOutput{}, fmt.Errorf("SERPER_API_KEY env var not set")
+	}
+
+	reqBody, err := buildSerperGoogleSearchRequest(input)
+	if err != nil {
+		return WebSearchOutput{}, err
+	}
+
+	payload, err := json.Marshal(reqBody)
+	if err != nil {
+		return WebSearchOutput{}, fmt.Errorf("marshal serper search request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://google.serper.dev/search", bytes.NewReader(payload))
+	if err != nil {
+		return WebSearchOutput{}, fmt.Errorf("create serper search request: %w", err)
+	}
+	req.Header.Set("X-API-KEY", apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return WebSearchOutput{}, fmt.Errorf("serper search request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return WebSearchOutput{}, fmt.Errorf("read serper search response: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return WebSearchOutput{}, fmt.Errorf("serper search returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var parsed serperGoogleSearchResponse
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return WebSearchOutput{}, fmt.Errorf("unmarshal serper search response: %w", err)
+	}
+
+	if parsed.Organic == nil {
+		parsed.Organic = []SerperOrganicResult{}
+	}
+
+	return WebSearchOutput{
+		Organic: parsed.Organic,
+		RawJSON: string(respBody),
+	}, nil
+}
+
+func buildSerperGoogleSearchRequest(input WebSearchInput) (serperGoogleSearchRequest, error) {
+	base := strings.TrimSpace(input.Query)
+	if base == "" {
+		return serperGoogleSearchRequest{}, fmt.Errorf("query cannot be empty")
+	}
+
+	loc := strings.TrimSpace(input.Location)
+	gl := ""
+	q := base
+	if loc != "" {
+		if isLikelyISO3166Alpha2(loc) {
+			gl = strings.ToLower(loc)
+		} else {
+			q = strings.TrimSpace(base + " " + loc)
+		}
+	}
+
+	tbs := dateCutoffToSerperTbs(input.DateCutoff)
+	return serperGoogleSearchRequest{Q: q, Gl: gl, Tbs: tbs}, nil
+}
+
+func isLikelyISO3166Alpha2(s string) bool {
+	if len(s) != 2 {
+		return false
+	}
+	for _, r := range s {
+		if r < 'A' || (r > 'Z' && r < 'a') || r > 'z' {
+			return false
+		}
+	}
+	return true
+}
+
+// dateCutoffToSerperTbs maps workflow date_cutoff to Google's tbs parameter (e.g. qdr:d).
+// Accepts shorthand or an already-valid tbs value prefixed with qdr:.
+func dateCutoffToSerperTbs(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	if s == "" {
+		return ""
+	}
+	if strings.HasPrefix(s, "qdr:") || strings.HasPrefix(s, "cdr:") {
+		return s
+	}
+	switch s {
+	case "d", "day", "1d":
+		return "qdr:d"
+	case "w", "week", "7d":
+		return "qdr:w"
+	case "m", "month", "30d":
+		return "qdr:m"
+	case "y", "year":
+		return "qdr:y"
+	default:
+		return ""
+	}
+}
+
 func tryExtractMainContent(e *colly.HTMLElement) string {
 	// Try common content selectors in priority order
 	selectors := []string{

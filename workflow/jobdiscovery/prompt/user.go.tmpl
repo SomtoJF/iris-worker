@@ -1,0 +1,12 @@
+<job_discovery_user_message>
+  <search_results>
+    {{- range .Hits}}
+    <search_result index="{{.Index}}">
+      <title>{{.Title}}</title>
+      <link>{{.Link}}</link>
+      <snippet>{{.Snippet}}</snippet>
+      <source_host_hint>{{.SourceHostHint}}</source_host_hint>
+    </search_result>
+    {{- end}}
+  </search_results>
+</job_discovery_user_message>
