@@ -164,6 +164,7 @@ func getModelRates(model string) modelRates {
 		"liquid/lfm-7b":                                {inputRate: 0.10, outputRate: 0.10},
 		"x-ai/grok-4.1-fast":                           {inputRate: 0.20, outputRate: 0.50},
 		"x-ai/grok-4-fast":                             {inputRate: 0.20, outputRate: 0.50},
+		"google/gemma-4-31b-it:free":                   {inputRate: 0.00, outputRate: 0.00},
 	}
 
 	if rate, ok := rates[model]; ok {
