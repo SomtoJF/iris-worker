@@ -23,6 +23,8 @@ type DiscoveredJob struct {
 	Title       string `json:"title"`
 	Url         string `json:"url"`
 	CompanyName string `json:"company_name"`
+	// DatePosted is the date the job was posted in YYYY-MM-DD format
+	DatePosted string `json:"date_posted"`
 }
 
 type JobDiscoveryWorkflowOutput struct {
