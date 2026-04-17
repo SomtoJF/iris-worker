@@ -23,12 +23,21 @@
 - [ x ] Wire in cost monitoring
 - [ x ] Migrate to postgres
 - [ x ] Deploy Iris
-- [ ] Collect additional data. Languages and fluency levels, portfolio link
 - [ ] Figure out captcha solving
 - [ ] Re-evaluate submission detection logic. Maybe just have the LLM figure it out. --Wait until the page is stable (network request has been made) and immediately take the screenshot. LLM checks if the form inputs are partially filled (usually means failure) or success messages or if we're on a different page than the application page with the form (like the job description page) or if the new url contains success indicators
 - [ x ] Research the best and cheapest google job search tool
 - [ x ] Implement built-in job search
-- [ ] Wire job search to frontend
+- [ ] Collect more onboarding data
+  - Are you open to relocating?
+  - Do you have a notice period and if so how long is it?
+  - Languages and fluency levels
+  - Portfolio Link
+  - Which of these do you resonate with
+    - Remote Work
+    - Hybrid Work
+    - Fully in-office
+- [ x ] Wire job search to frontend
+- [ ] Include location in the serper search query to reinforce the search location
 - [ ] Indeed Integration
 - [ ] Viewing application data for each application
 - [ ] Integrate Sentry for production logging and error detection
