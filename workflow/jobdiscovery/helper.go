@@ -23,7 +23,8 @@ var (
 
 // UserPromptData is passed to workflow/jobdiscovery/prompt/user.go.tmpl.
 type UserPromptData struct {
-	Hits []UserPromptHit
+	Hits      []UserPromptHit
+	TodayDate string
 }
 
 // UserPromptHit is one search result block in the user template.

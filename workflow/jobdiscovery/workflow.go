@@ -73,7 +73,8 @@ func JobDiscoveryWorkflow(ctx workflow.Context, input JobDiscoveryWorkflowInput)
 	}
 
 	userPrompt, err := renderJobDiscoveryUserPrompt(UserPromptData{
-		Hits: userPromptHitsFromMerged(merged),
+		Hits:      userPromptHitsFromMerged(merged),
+		TodayDate: time.Now().Format("2006-01-02"),
 	})
 	if err != nil {
 		return JobDiscoveryWorkflowOutput{}, fmt.Errorf("render job discovery user prompt: %w", err)
@@ -155,6 +156,10 @@ func discoveredJobsResponseSchema() map[string]interface{} {
 						"company_name": map[string]interface{}{
 							"type":        "string",
 							"description": "Employer or brand name hiring for this role; infer from title, snippet, or URL path when not explicit",
+						},
+						"date_posted": map[string]interface{}{
+							"type":        "string",
+							"description": "Date the job was posted in YYYY-MM-DD format",
 						},
 					},
 					"required": []string{"title", "url", "company_name"},
