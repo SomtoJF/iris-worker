@@ -56,10 +56,10 @@ func JobDiscoveryWorkflow(ctx workflow.Context, input JobDiscoveryWorkflowInput)
 
 	jobSources := []string{
 		jobSourceGreenhouse,
-		jobSourceLever,
-		jobSourceWellfound,
-		jobSourceWorkable,
-		jobSourceAshby,
+		// jobSourceLever,
+		// jobSourceWellfound,
+		// jobSourceWorkable,
+		// jobSourceAshby,
 		// jobSourceRemotefront,
 	}
 
@@ -93,10 +93,11 @@ func JobDiscoveryWorkflow(ctx workflow.Context, input JobDiscoveryWorkflowInput)
 		return JobDiscoveryWorkflowOutput{}, err
 	}
 
+	jsonPayload := stripLLMJSONFences(llmResponse.Content)
 	var parsed struct {
 		Jobs []DiscoveredJob `json:"jobs"`
 	}
-	if err := json.Unmarshal([]byte(llmResponse.Content), &parsed); err != nil {
+	if err := json.Unmarshal([]byte(jsonPayload), &parsed); err != nil {
 		return JobDiscoveryWorkflowOutput{}, fmt.Errorf("unmarshal discovered jobs: %w", err)
 	}
 	if parsed.Jobs == nil {
@@ -104,6 +105,24 @@ func JobDiscoveryWorkflow(ctx workflow.Context, input JobDiscoveryWorkflowInput)
 	}
 
 	return JobDiscoveryWorkflowOutput{Jobs: parsed.Jobs}, nil
+}
+
+// stripLLMJSONFences removes markdown code fences (e.g. ```json ... ```) so the
+// string can be passed to json.Unmarshal. If there are no fences, content is
+// returned trimmed unchanged.
+func stripLLMJSONFences(content string) string {
+	s := strings.TrimSpace(content)
+	if !strings.HasPrefix(s, "```") {
+		return s
+	}
+	s = strings.TrimSpace(strings.TrimPrefix(s, "```"))
+	if len(s) >= 4 && strings.EqualFold(s[:4], "json") {
+		s = strings.TrimSpace(s[4:])
+	}
+	if i := strings.LastIndex(s, "```"); i >= 0 {
+		s = strings.TrimSpace(s[:i])
+	}
+	return strings.TrimSpace(s)
 }
 
 func buildSearchQueries(input JobDiscoveryWorkflowInput, jobSources []string) []string {
