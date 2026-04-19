@@ -42,7 +42,7 @@
     - Hybrid work (some days remote, some days in-office)
     - Fully in-office
 - [ x ] Wire job search to frontend
-- [ ] Include location in the serper search query to reinforce the search location
+- [ x ] Include location in the serper search query to reinforce the search location
 - [ ] Indeed Integration
 - [ ] Viewing application data for each application
 - [ ] Integrate Sentry for production logging and error detection

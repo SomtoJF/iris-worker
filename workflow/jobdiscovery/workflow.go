@@ -8,6 +8,7 @@ import (
 
 	"github.com/SomtoJF/iris-worker/activity/web"
 	"github.com/SomtoJF/iris-worker/aipi/types"
+	"github.com/biter777/countries"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
@@ -125,8 +126,25 @@ func stripLLMJSONFences(content string) string {
 	return strings.TrimSpace(s)
 }
 
+func countryNameFromAlpha2(location string) string {
+	code := strings.ToUpper(strings.TrimSpace(location))
+	if code == "" {
+		return ""
+	}
+
+	c := countries.ByName(code)
+	if c == countries.Unknown {
+		return ""
+	}
+
+	return c.String()
+}
+
 func buildSearchQueries(input JobDiscoveryWorkflowInput, jobSources []string) []string {
 	q := strings.TrimSpace(input.SearchQuery)
+	if countryName := countryNameFromAlpha2(input.Location); countryName != "" {
+		q = strings.TrimSpace(q + " " + countryName)
+	}
 	out := make([]string, 0, len(jobSources))
 	for _, host := range jobSources {
 		out = append(out, strings.TrimSpace(fmt.Sprintf("site:%s %s", host, q)))

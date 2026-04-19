@@ -149,6 +149,9 @@ github.com/aws/smithy-go/tracing
 github.com/aws/smithy-go/transport/http
 github.com/aws/smithy-go/transport/http/internal/io
 github.com/aws/smithy-go/waiter
+# github.com/biter777/countries v1.7.5
+## explicit; go 1.13
+github.com/biter777/countries
 # github.com/bits-and-blooms/bitset v1.24.4
 ## explicit; go 1.16
 github.com/bits-and-blooms/bitset
