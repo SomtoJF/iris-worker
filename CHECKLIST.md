@@ -28,13 +28,18 @@
 - [ x ] Research the best and cheapest google job search tool
 - [ x ] Implement built-in job search
 - [ ] Collect more onboarding data
-  - Are you open to relocating?
+  - Are you open to relocating (single select/radio: Yes/No)?
   - Do you have a notice period and if so how long is it?
-  - Languages and fluency levels
+  - Languages and fluency levels i.e
+    - Native / Bilingual: Mother tongue or perfect native ability.
+    - Full Professional Proficiency: Can communicate fluently and accurately in nearly all work situations.
+    - Professional Working Proficiency: Can participate effectively in most conversations at work and handle tasks independently.
+    - Limited Working Proficiency: Can handle routine or simple work tasks with basic conversations and instructions.
+    - Elementary Proficiency: Can communicate at a very basic level, such as greetings or simple travel needs.
   - Portfolio Link
-  - Which of these do you resonate with
-    - Remote Work
-    - Hybrid Work
+  - What is your preferred working arrangement? (Select all that apply)
+    - Remote work
+    - Hybrid work (some days remote, some days in-office)
     - Fully in-office
 - [ x ] Wire job search to frontend
 - [ ] Include location in the serper search query to reinforce the search location
