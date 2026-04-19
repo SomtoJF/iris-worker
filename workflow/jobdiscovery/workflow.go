@@ -84,7 +84,7 @@ func JobDiscoveryWorkflow(ctx workflow.Context, input JobDiscoveryWorkflowInput)
 	llmRequest := types.AIPIRequest{
 		SystemMessage:  systemPrompt,
 		UserMessage:    userPrompt,
-		Model:          "google/gemma-4-31b-it:free",
+		Model:          "x-ai/grok-4.1-fast",
 		ResponseSchema: discoveredJobsResponseSchema(),
 		IdUser:         input.IdUser,
 	}
