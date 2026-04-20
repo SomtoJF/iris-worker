@@ -41,9 +41,17 @@
     - Fully in-office
 - [ x ] Wire job search to frontend
 - [ x ] Include location in the serper search query to reinforce the search location
+- [ ] Integrate Sentry for production logging and error detection on worker repo
+- [ ] Implement feedback system. Form will have the following fields
+  - Title
+  - Type - enum (Bug, Feature Request)
+  - Job Application (optional - will link the job application to the feedback record)
+  - Description
+  - Summary (Backend-only LLM generated summary of the feedback data)
+  - Upvote
+- [ ] Add and Display failure reasons for each application.
 - [ ] Figure out captcha solving
 - [ ] Re-evaluate submission detection logic. Maybe just have the LLM figure it out. --Wait until the page is stable (network request has been made) and immediately take the screenshot. LLM checks if the form inputs are partially filled (usually means failure) or success messages or if we're on a different page than the application page with the form (like the job description page) or if the new url contains success indicators
 - [ ] Indeed Integration
 - [ ] Viewing application data for each application
-- [ ] Integrate Sentry for production logging and error detection
 - [ ] Make sure Job Search and apply works well for Greenhouse (job-boards.greenhouse.io), Lever (jobs.lever.co), Wellfound (wellfound.com), Workable (apply.workable.com), Ashby (jobs.ashbyhq.com), Remotefront (remotefront.com)
