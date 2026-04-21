@@ -17,6 +17,7 @@ import (
 	"github.com/SomtoJF/iris-worker/workflow/jobdiscovery"
 	"github.com/SomtoJF/iris-worker/workflow/processresume"
 	"github.com/SomtoJF/iris-worker/workflow/submitapplication"
+	"github.com/SomtoJF/iris-worker/workflow/summarizeissue"
 	"go.temporal.io/sdk/worker"
 )
 
@@ -65,6 +66,7 @@ func registerJobApplicationWorkflows(w worker.Worker) {
 	w.RegisterWorkflow(submitapplication.SubmitApplicationWorkflow)
 	w.RegisterWorkflow(handleuseraction.HandleUserActionWorkflow)
 	w.RegisterWorkflow(jobdiscovery.JobDiscoveryWorkflow)
+	w.RegisterWorkflow(summarizeissue.SummarizeIssueWorkflow)
 }
 
 func registerJobApplicationActivities(w worker.Worker, dependencies common.Dependencies) {
