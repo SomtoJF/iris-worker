@@ -42,7 +42,7 @@ func SummarizeIssueWorkflow(ctx workflow.Context, input SummarizeIssueWorkflowIn
 
 	systemPrompt := "You write concise product issue summaries."
 	userPrompt := fmt.Sprintf(
-		"Summarize this issue in exactly two lines. Be specific and actionable.\n\nTitle: %s\nType: %s\n\nBody (Markdown):\n%s\n",
+		"Summarize this issue in exactly two lines. Be concise and clear.\n\nTitle: %s\nType: %s\n\nBody (Markdown):\n%s\n",
 		issue.Title,
 		issue.Type,
 		issue.ContentText,
@@ -51,7 +51,7 @@ func SummarizeIssueWorkflow(ctx workflow.Context, input SummarizeIssueWorkflowIn
 	llmReq := types.AIPIRequest{
 		SystemMessage:  systemPrompt,
 		UserMessage:    userPrompt,
-		Model:          "x-ai/grok-4.1-fast",
+		Model:          "google/gemma-4-31b-it",
 		ResponseSchema: summarizeIssueResponseSchema(),
 		Temperature:    floatPtr(0.2),
 		MaxTokens:      intPtr(120),
