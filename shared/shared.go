@@ -4,7 +4,6 @@ package shared
 type UserAction string
 
 const (
-	UserActionCaptcha        = "USER_ACTION_CAPTCHA"
-	UserActionAuthentication = "USER_ACTION_AUTHENTICATION"
+	UserActionAdditionalInfo = "USER_ACTION_ADDITIONAL_INFO"
 	UserActionOTP            = "USER_ACTION_OTP"
 )

@@ -1,5 +1,5 @@
 <task>
-You are analyzing a screenshot of a web page that is blocking an automated job application. The page requires human intervention. Your job is to identify the form fields the user needs to fill out and return a structured layout describing those fields.
+You are analyzing a screenshot of a web page or form field that is blocking an automated job application. The page requires human intervention. Your job is to identify the form fields the user needs to fill out and return a structured layout describing those fields.
 </task>
 
 <context>
@@ -8,10 +8,10 @@ Action details: {{.ActionDetails}}
 </context>
 
 <instructions>
-Analyze the screenshot and identify all form fields the user needs to interact with to resolve the blocking page.
+Analyze the screenshot and identify all form fields the user needs to interact with to resolve the issue outlined in the action details. The scope of your should be limited to the action details.
 
 For each field, provide:
-- field_name: A human-readable label for the field (e.g. "Username", "Password", "OTP Code", "CAPTCHA Text")
+- field_name: A human-readable label for the field (e.g. "Username", "Password", "OTP Code", "Do you have any pets?")
 - type: The HTML input type if applicable (e.g. "text", "password", "number", "email", "tel"). Null if not an input.
 - component: The UI component type (e.g. "input", "textarea", "select", "radio", "checkbox"). Null if unknown.
 - options: For select/radio/checkbox fields, provide the available options as an array. Null otherwise.
@@ -22,9 +22,8 @@ Simplicity (critical):
 - Do not invent fields that are not visible or implied by the screenshot and action type. Match labels to what the user actually sees.
 
 Common patterns by action type:
-- USER_ACTION_CAPTCHA: Usually a single text input for the CAPTCHA solution
-- USER_ACTION_AUTHENTICATION: Usually username/email + password fields; add a second factor field only if the screenshot shows it
 - USER_ACTION_OTP: Almost always one text input for the full code (six digits in one box is one field, not six)
+- USER_ACTION_ADDITIONAL_INFO: Usually a textarea or input field for the user to add additional information or a form field for the user to fill out.
 </instructions>
 
 <few_shot_examples>
@@ -34,20 +33,8 @@ Screenshot shows a single "Enter verification code" box.
   {"field_name": "OTP Verification code", "type": "text", "component": "input", "options": null}
 ]
 
-Example 2 — CAPTCHA:
-Screenshot shows an image and one text box for the answer.
-[
-  {"field_name": "CAPTCHA solution", "type": "text", "component": "input", "options": null}
-]
 
-Example 3 — Login (minimal):
-Screenshot shows email and password only.
-[
-  {"field_name": "Email", "type": "email", "component": "input", "options": null},
-  {"field_name": "Password", "type": "password", "component": "input", "options": null}
-]
-
-Example 4 — Select with visible options:
+Example 2 — Additional Info:
 Screenshot shows a dropdown labeled "Country" with listed countries.
 [
   {"field_name": "Country", "type": null, "component": "select", "options": ["United States", "Canada", "United Kingdom"]}

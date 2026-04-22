@@ -12,6 +12,7 @@ import (
 	"github.com/SomtoJF/iris-worker/aipi/types"
 	"github.com/SomtoJF/iris-worker/browserfactory"
 	"github.com/SomtoJF/iris-worker/helper"
+	"github.com/SomtoJF/iris-worker/shared"
 	"go.temporal.io/sdk/workflow"
 )
 
@@ -39,6 +40,8 @@ type ToolCallResult struct {
 
 type PlannerResponse struct {
 	IsApplicationComplete bool      `json:"is_application_complete"`
+	IsApplicationFailed   bool      `json:"is_application_failed"`
+	FailureReason         *string   `json:"failure_reason,omitempty"`
 	ToolCall              *ToolCall `json:"tool_call,omitempty"`
 	Reasoning             string    `json:"reasoning,omitempty"`
 }
@@ -229,7 +232,7 @@ var toolRequestStructureMap = map[string]map[string]interface{}{
 		"properties": map[string]interface{}{
 			"user_action": map[string]interface{}{
 				"type": "string",
-				"enum": []string{"USER_ACTION_CAPTCHA", "USER_ACTION_AUTHENTICATION", "USER_ACTION_OTP"},
+				"enum": []string{shared.UserActionAdditionalInfo, shared.UserActionOTP},
 			},
 			"action_details": map[string]interface{}{
 				"type": "string",
@@ -365,6 +368,17 @@ func getPlannerResponseSchema() map[string]interface{} {
 				"type":        "boolean",
 				"description": "Whether the job application has been successfully completed",
 			},
+			"is_application_failed": map[string]interface{}{
+				"type":        "boolean",
+				"description": "Whether the job application has failed and requires human intervention",
+			},
+			"failure_reason": map[string]interface{}{
+				"anyOf": []map[string]interface{}{
+					{"type": "string"},
+					{"type": "null"},
+				},
+				"description": "The reason the job application failed (string or null)",
+			},
 			"tool_call": map[string]interface{}{
 				"anyOf": []map[string]interface{}{
 					{"type": "null"},
@@ -389,7 +403,7 @@ func getPlannerResponseSchema() map[string]interface{} {
 				"description": "Brief explanation of the decision and next action",
 			},
 		},
-		"required": []string{"is_application_complete", "reasoning", "tool_call"},
+		"required": []string{"is_application_complete", "is_application_failed", "failure_reason", "reasoning", "tool_call"},
 	}
 }
 
@@ -405,9 +419,10 @@ func getBase64Screenshot(screenshotPath string) (string, error) {
 }
 
 type JobDetails struct {
-	JobTitle       string `json:"job_title"`
-	CompanyName    string `json:"company_name"`
-	JobDescription string `json:"job_description"`
+	JobTitle          string `json:"job_title"`
+	CompanyName       string `json:"company_name"`
+	JobDescription    string `json:"job_description"`
+	IsValidJobPosting bool   `json:"is_valid_job_posting"`
 }
 
 func retrieveJobDetails(ctx workflow.Context, url string, idUser uint, idJobApplication uint) (JobDetails, error) {
@@ -428,7 +443,7 @@ func retrieveJobDetails(ctx workflow.Context, url string, idUser uint, idJobAppl
 	}
 
 	// Build LLM request to extract job details
-	systemPrompt := "Extract the job title, company name, and job description from the provided scraped webpage content. Return the data in JSON format. Most job descriptions have a 'Who we are' or 'About us' or 'Company Description' section that contains the company's details. This is where you should look for the company name."
+	systemPrompt := "Extract the job title, company name, and job description from the provided scraped webpage content. Return the data in JSON format. Most job descriptions have a 'Who we are' or 'About us' or 'Company Description' section that contains the company's details. This is where you should look for the company name. If this page doesn't include the job description, It is invalid and you should set is_valid_job_posting to false. For invalid job postings, return an empty string for the job description, job title, and company name."
 	userPrompt := fmt.Sprintf("Scraped content:\n\n%s", scrapedData)
 
 	llmRequest := types.AIPIRequest{
@@ -469,8 +484,12 @@ func getJobDetailsResponseSchema() map[string]interface{} {
 				"type":        "string",
 				"description": "The full job description including responsibilities, requirements, and qualifications",
 			},
+			"is_valid_job_posting": map[string]interface{}{
+				"type":        "boolean",
+				"description": "Whether the job posting is valid and contains the necessary information",
+			},
 		},
-		"required": []string{"job_title", "company_name", "job_description"},
+		"required": []string{"job_title", "company_name", "job_description", "is_valid_job_posting"},
 	}
 }
 

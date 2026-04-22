@@ -1,16 +1,20 @@
 package common
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/SomtoJF/iris-worker/aipi"
 	"github.com/SomtoJF/iris-worker/browserfactory"
 	"github.com/SomtoJF/iris-worker/initializers/fs"
+	posthogInit "github.com/SomtoJF/iris-worker/initializers/posthog"
 	"github.com/SomtoJF/iris-worker/initializers/s3"
 	"github.com/SomtoJF/iris-worker/initializers/sqldb"
 	"github.com/SomtoJF/iris-worker/initializers/temporal"
 	s3pkg "github.com/SomtoJF/iris-worker/pkg/s3"
+	"github.com/posthog/posthog-go"
 	"github.com/revrost/go-openrouter"
 	"go.temporal.io/sdk/client"
 	"gorm.io/gorm"
@@ -22,6 +26,7 @@ type Dependencies interface {
 	GetBrowserClient() browserfactory.BrowserClient
 	GetS3Manager() *s3pkg.S3Manager
 	GetTemporalClient() client.Client
+	GetPosthogClient() posthog.Client
 	Cleanup()
 }
 
@@ -32,6 +37,7 @@ type dependencies struct {
 	browserClient  browserfactory.BrowserClient
 	fs             *fs.TemporaryFileSystem
 	s3Manager      *s3pkg.S3Manager
+	posthogClient  posthog.Client
 }
 
 func (d *dependencies) GetAIPIClient() *aipi.AIPIClient {
@@ -54,9 +60,14 @@ func (d *dependencies) GetTemporalClient() client.Client {
 	return d.temporalClient
 }
 
+func (d *dependencies) GetPosthogClient() posthog.Client {
+	return d.posthogClient
+}
+
 func (d *dependencies) Cleanup() {
 	d.fs.Cleanup()
 	d.temporalClient.Close()
+	posthogInit.ClosePosthog()
 }
 
 func MakeDependencies() (Dependencies, error) {
@@ -86,7 +97,33 @@ func MakeDependencies() (Dependencies, error) {
 	bucket := os.Getenv("AWS_BUCKET")
 	s3Manager := s3pkg.NewS3Manager(s3Client, bucket)
 
-	temporalClient, err := temporal.ConnectToTemporal()
+	err = posthogInit.NewPosthog()
+	if err != nil {
+		return nil, fmt.Errorf("posthog: %w", err)
+	}
+
+	posthogClient := posthogInit.PosthogClient
+
+	baseHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})
+
+	logger := slog.New(posthog.NewSlogCaptureHandler(baseHandler, posthogClient,
+		posthog.WithDistinctIDFn(func(_ context.Context, r slog.Record) string {
+			var workflowID string
+			r.Attrs(func(a slog.Attr) bool {
+				if a.Key == "WorkflowID" {
+					workflowID = a.Value.String()
+					return false
+				}
+				return true
+			})
+			return workflowID
+		}),
+	))
+
+	temporalLogger := NewTemporalSlogLogger(logger)
+	temporalClient, err := temporal.ConnectToTemporal(temporalLogger)
 	if err != nil {
 		return nil, fmt.Errorf("temporal: %w", err)
 	}
@@ -98,5 +135,6 @@ func MakeDependencies() (Dependencies, error) {
 		fs:             fs,
 		s3Manager:      s3Manager,
 		temporalClient: temporalClient,
+		posthogClient:  posthogClient,
 	}, nil
 }
