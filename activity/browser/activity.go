@@ -94,10 +94,6 @@ func (a *Activity) Click(ctx context.Context, input ClickInput) error {
 		return fmt.Errorf("failed to get tagged nodes: %w", err)
 	}
 
-	if input.ElementIndex < 0 || input.ElementIndex >= len(taggedNodes) {
-		return fmt.Errorf("element index %d out of range (0-%d)", input.ElementIndex, len(taggedNodes)-1)
-	}
-
 	element := taggedNodes[input.ElementIndex].Element
 	if element == nil {
 		return fmt.Errorf("element at index %d has no DOM element", input.ElementIndex)
