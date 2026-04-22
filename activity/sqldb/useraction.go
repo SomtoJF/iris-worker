@@ -116,3 +116,11 @@ type UpdateUserActionInput struct {
 func (a *Activity) UpdateUserAction(ctx context.Context, input UpdateUserActionInput) error {
 	return a.db.Model(&UserAction{}).Where("id_user_action = ?", input.IdUserAction).Updates(input.Data).Error
 }
+
+type DeletePendingUserActionsInput struct {
+	JobApplicationId uint `json:"id_job_application"`
+}
+
+func (a *Activity) DeletePendingUserActions(ctx context.Context, input DeletePendingUserActionsInput) error {
+	return a.db.Where("id_job_application = ? AND is_pending = ?", input.JobApplicationId, true).Delete(&UserAction{}).Error
+}
