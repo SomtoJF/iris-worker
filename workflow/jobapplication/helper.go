@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"text/template"
@@ -55,6 +56,7 @@ type PlannerRequest struct {
 	UserResumePath          string                                           `json:"user_resume_path"`
 	ScreenshotPath          string                                           `json:"screenshot_path"`
 	TaggedNodes             []browserfactory.SerializableTaggedNode          `json:"tagged_nodes"`
+	RequiredFields          []browserfactory.SerializableTaggedNode          `json:"required_fields"`
 	TaggedFileInputElements []browserfactory.SerializableTaggedFileInputNode `json:"tagged_file_input_elements"`
 	ToolCallHistory         []ToolCallResult                                 `json:"tool_call_history"`
 	UserProfileJSON         string                                           `json:"user_profile"`
@@ -268,6 +270,23 @@ func SetTemplates() {
 		"json": func(v interface{}) string {
 			b, _ := json.Marshal(v)
 			return string(b)
+		},
+		"xmlEscape": func(s string) string {
+			var buf bytes.Buffer
+			_ = xml.EscapeText(&buf, []byte(s))
+			return buf.String()
+		},
+		"derefString": func(s *string) string {
+			if s == nil {
+				return ""
+			}
+			return *s
+		},
+		"derefBool": func(b *bool) bool {
+			if b == nil {
+				return false
+			}
+			return *b
 		},
 	}
 

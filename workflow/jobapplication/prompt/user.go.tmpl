@@ -29,19 +29,39 @@ Apply to the job posting at: {{.JobPostingUrl}}
 </job_description>
 
 <current_page>
-<interactive_elements>
-{{if .TaggedNodes}}The following elements are visible and interactive on the current page:
-{{range .TaggedNodes}}
-<tagged_node>
-index: {{.Index}}
-description: {{.Description}}
-x: {{printf "%.0f" .X}}
-y: {{printf "%.0f" .Y}}
-width: {{printf "%.0f" .Width}}
-height: {{printf "%.0f" .Height}}
-</tagged_node>
-{{end}}{{else}}No interactive elements detected on the current page.{{end}}
-</interactive_elements>
+<all_interactive_elements>
+   {{if .TaggedNodes}}The following elements are visible and interactive on the current page:
+   {{range .TaggedNodes}}
+   <tagged_node>
+   <index>{{.Index}}</index>
+   <description>{{xmlEscape .Description}}</description>
+   <role>{{xmlEscape .Role}}</role>
+   {{if .Value}}<value>{{xmlEscape (derefString .Value)}}</value>{{end}}
+   {{if .Required}}<is_required>{{derefBool .Required}}</is_required>{{end}}
+   {{if .Checked}}<checked_state>{{xmlEscape (derefString .Checked)}}</checked_state>{{end}}
+   <x>{{printf "%.0f" .X}}</x>
+   <y>{{printf "%.0f" .Y}}</y>
+   <width>{{printf "%.0f" .Width}}</width>
+   <height>{{printf "%.0f" .Height}}</height>
+   </tagged_node>
+   {{end}}{{else}}No interactive elements detected on the current page.{{end}}
+</all_interactive_elements>
+
+<required_elements>
+{{if .RequiredFields}}The following elements are required fields on the current page:
+{{range .RequiredFields}}
+<required_node>
+  <index>{{.Index}}</index>
+  <description>{{xmlEscape .Description}}</description>
+  <role>{{xmlEscape .Role}}</role>
+  {{if .Value}}<value>{{xmlEscape (derefString .Value)}}</value>{{end}}
+  <x>{{printf "%.0f" .X}}</x>
+  <y>{{printf "%.0f" .Y}}</y>
+  <width>{{printf "%.0f" .Width}}</width>
+  <height>{{printf "%.0f" .Height}}</height>
+</required_node>
+{{end}}{{else}}No required fields detected on the current page.{{end}}
+</required_elements>
 
 <file_input_elements>
 {{if .TaggedFileInputElements}}The following file input elements are visible on the current page:

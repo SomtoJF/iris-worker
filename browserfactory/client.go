@@ -217,6 +217,32 @@ func tagAccessibilityNodes(page *rod.Page, accessibilityTree []*proto.Accessibil
 
 		element := getElementFromNode(page, node)
 		description := getDescriptionFromNode(node, i, element)
+		role := getNodeRole(node, element)
+		value := getNodeValue(node, element)
+
+		interactiveFormRoles := map[string]struct{}{
+			"checkbox":  {},
+			"radio":     {},
+			"switch":    {},
+			"textbox":   {},
+			"searchbox": {},
+			"textarea":  {},
+			"select":    {},
+			"combobox":  {},
+		}
+
+		var requiredPtr *bool
+		if _, ok := interactiveFormRoles[role]; ok {
+			required := isNodeRequired(node, element)
+			requiredPtr = &required
+		}
+		var checkedPtr *string
+
+		if role == "checkbox" || role == "radio" || role == "switch" {
+			if checked := getCheckboxCheckedState(node); checked != "" {
+				checkedPtr = &checked
+			}
+		}
 
 		taggedNodes = append(taggedNodes, &TaggedAccessibilityNode{
 			Node:        node,
@@ -224,10 +250,71 @@ func tagAccessibilityNodes(page *rod.Page, accessibilityTree []*proto.Accessibil
 			Bounds:      bounds,
 			Index:       i,
 			Description: description,
+			Role:        role,
+			Value:       &value,
+			Required:    requiredPtr,
+			Checked:     checkedPtr,
 		})
 	}
 
 	return taggedNodes
+}
+
+func getNodeRole(node *proto.AccessibilityAXNode, element *rod.Element) string {
+	role := ""
+	if node.Role != nil && !node.Role.Value.Nil() {
+		role = node.Role.Value.String()
+	}
+	return role
+}
+
+func getNodeValue(node *proto.AccessibilityAXNode, element *rod.Element) string {
+	role := ""
+	if node.Role != nil && !node.Role.Value.Nil() {
+		role = node.Role.Value.String()
+	}
+
+	value := ""
+	if v := node.Value; v != nil && !v.Value.Nil() {
+		value = v.Value.String()
+	} else {
+		if role == "combobox" && element != nil {
+			reactVal, err := getReactSelectComboboxValue(element)
+			if err == nil && reactVal != "" {
+				value = reactVal
+			}
+		}
+	}
+	return value
+}
+
+func isNodeRequired(node *proto.AccessibilityAXNode, element *rod.Element) bool {
+	if element != nil {
+		// HTML boolean attribute: presence means true.
+		if v, err := element.Attribute("required"); err == nil && v != nil {
+			return true
+		}
+
+		// ARIA attribute: explicit boolean string.
+		if v, err := element.Attribute("aria-required"); err == nil && v != nil {
+			switch strings.ToLower(strings.TrimSpace(*v)) {
+			case "true", "1":
+				return true
+			case "false", "0":
+				return false
+			}
+		}
+	}
+
+	// Fallback to AX properties if present.
+	if node.Properties != nil {
+		for _, prop := range node.Properties {
+			if prop.Name == "required" && prop.Value != nil {
+				return prop.Value.Value.Bool()
+			}
+		}
+	}
+	return false
 }
 
 func getDescriptionFromNode(node *proto.AccessibilityAXNode, index int, element *rod.Element) string {
@@ -239,29 +326,9 @@ func getDescriptionFromNode(node *proto.AccessibilityAXNode, index int, element 
 	if node.Role != nil && !node.Role.Value.Nil() {
 		role = node.Role.Value.String()
 	}
-	value := ""
-	if v := node.Value; v != nil && !v.Value.Nil() {
-		value = v.Value.String()
-	}
 
 	// Default description for non-file inputs
 	desc := fmt.Sprintf("Tag %d: Role: %s - Name: %s", index, strings.ToUpper(role), name)
-	if value != "" {
-		desc += fmt.Sprintf(" Value: %s", value)
-	} else {
-		if role == "combobox" && element != nil {
-			reactVal, err := getReactSelectComboboxValue(element)
-			if err == nil && reactVal != "" {
-				desc += fmt.Sprintf(" Value: %s", reactVal)
-			}
-		}
-	}
-
-	if role == "checkbox" || role == "radio" || role == "switch" {
-		if checked := getCheckboxCheckedState(node); checked != "" {
-			desc += fmt.Sprintf(" Checked: %s", checked)
-		}
-	}
 
 	return desc
 }

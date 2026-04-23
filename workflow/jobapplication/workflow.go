@@ -8,6 +8,7 @@ import (
 	"github.com/SomtoJF/iris-worker/activity/browser"
 	"github.com/SomtoJF/iris-worker/activity/realtimeevent"
 	"github.com/SomtoJF/iris-worker/activity/sqldb"
+	"github.com/SomtoJF/iris-worker/browserfactory"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
@@ -135,6 +136,8 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 			return err
 		}
 
+		requiredFields := extractRequiredFields(screenshot.TaggedNodes)
+
 		plannerRequest := PlannerRequest{
 			IdUser:                  input.IdUser,
 			IdJobApplication:        input.IdJobApplication,
@@ -147,6 +150,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 			JobDescription:          jobDetails.JobDescription,
 			UserResumePath:          resumePath,
 			UserProfileJSON:         userProfileJSON,
+			RequiredFields:          requiredFields,
 		}
 
 		plannerResponse, err := planNextAction(ctx, plannerRequest)
@@ -187,6 +191,33 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	handleApplicationSuccess(ctx, input, jobDetails)
 
 	return nil
+}
+
+func extractRequiredFields(taggedNodes []browserfactory.SerializableTaggedNode) []browserfactory.SerializableTaggedNode {
+	required := make([]browserfactory.SerializableTaggedNode, 0)
+	for _, node := range taggedNodes {
+		if node.Required == nil || !*node.Required {
+			continue
+		}
+
+		// Copy to avoid any accidental mutation of shared pointers downstream.
+		copied := node
+		if node.Value != nil {
+			v := *node.Value
+			copied.Value = &v
+		}
+		if node.Required != nil {
+			r := *node.Required
+			copied.Required = &r
+		}
+		if node.Checked != nil {
+			c := *node.Checked
+			copied.Checked = &c
+		}
+
+		required = append(required, copied)
+	}
+	return required
 }
 
 func handleApplicationError(ctx workflow.Context, input JobApplicationWorkflowInput, jobDetails JobDetails, failureReason string) {

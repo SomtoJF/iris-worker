@@ -17,6 +17,10 @@ type TaggedAccessibilityNode struct {
 	Bounds      *proto.DOMRect
 	Index       int
 	Description string
+	Value       *string
+	Required    *bool
+	Role        string
+	Checked     *string
 }
 
 type TaggedFileInputNode struct {
@@ -52,6 +56,10 @@ type SerializableTaggedNode struct {
 	Y           float64 `json:"y"`
 	Width       float64 `json:"width"`
 	Height      float64 `json:"height"`
+	Role        string  `json:"role"`
+	Value       *string `json:"value"`
+	Required    *bool   `json:"required"`
+	Checked     *string `json:"checked"`
 }
 
 // ToSerializable converts TaggedAccessibilityNode to SerializableTaggedNode
@@ -63,5 +71,9 @@ func (t *TaggedAccessibilityNode) ToSerializable() SerializableTaggedNode {
 		Y:           t.Bounds.Y,
 		Width:       t.Bounds.Width,
 		Height:      t.Bounds.Height,
+		Role:        t.Role,
+		Value:       t.Value,
+		Required:    t.Required,
+		Checked:     t.Checked,
 	}
 }
