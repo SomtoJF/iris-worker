@@ -38,6 +38,8 @@ type HandleUserActionWorkflowInput struct {
 
 const signalName = "USER_ACTION_RESULT"
 
+const USER_ACTION_TIMEOUT = 15 * time.Minute
+
 func HandleUserActionWorkflow(ctx workflow.Context, input HandleUserActionWorkflowInput) (map[string]interface{}, error) {
 	logger := workflow.GetLogger(ctx)
 	logger.Info("HandleUserActionWorkflow started", "input", input)
@@ -71,6 +73,13 @@ func HandleUserActionWorkflow(ctx workflow.Context, input HandleUserActionWorkfl
 	layout, err := buildUserActionLayout(ctx, screenshot.Path, input.UserAction, input.ActionDetails, input.IdUser, input.IdJobApplication)
 	if err != nil {
 		logger.Error("Failed to build user action layout", "error", err)
+		return nil, err
+	}
+
+	if err := workflow.ExecuteActivity(ctx, "DeletePendingUserActions", sqldb.DeletePendingUserActionsInput{
+		JobApplicationId: input.IdJobApplication,
+	}).Get(ctx, nil); err != nil {
+		logger.Error("Failed to delete pending user actions", "error", err)
 		return nil, err
 	}
 
@@ -236,7 +245,7 @@ func notifyUser(ctx workflow.Context, userID uint, input notifyUserInput) error 
 
 func waitForUserAction(ctx workflow.Context) (sqldb.UserActionResult, error) {
 	signalChan := workflow.GetSignalChannel(ctx, signalName)
-	timerChan := workflow.NewTimer(ctx, 10*time.Minute)
+	timerChan := workflow.NewTimer(ctx, USER_ACTION_TIMEOUT)
 
 	var result sqldb.UserActionResult
 	selector := workflow.NewSelector(ctx)
@@ -250,7 +259,7 @@ func waitForUserAction(ctx workflow.Context) (sqldb.UserActionResult, error) {
 	selector.Select(ctx)
 
 	if !signalReceived {
-		return nil, fmt.Errorf("timeout waiting for user action after 10 minutes")
+		return nil, fmt.Errorf("timeout waiting for user action after %s", USER_ACTION_TIMEOUT)
 	}
 	return result, nil
 }

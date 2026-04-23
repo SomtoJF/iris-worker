@@ -194,10 +194,8 @@ func handleApplicationError(ctx workflow.Context, input JobApplicationWorkflowIn
 	if failureReason != "" {
 		failureReasonPtf = &failureReason
 	}
-	workflow.ExecuteActivity(ctx, "DeletePendingUserActions", sqldb.DeletePendingUserActionsInput{
-		JobApplicationId: input.IdJobApplication,
-	}).Get(ctx, nil)
 	updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed, failureReasonPtf)
+
 	workflow.ExecuteActivity(ctx, "PublishRedisEvent", input.IdUser, string(realtimeevent.EventApplicationFailed), map[string]interface{}{
 		"id":          input.ApplicationExternalId,
 		"jobTitle":    jobDetails.JobTitle,
