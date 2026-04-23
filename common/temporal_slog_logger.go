@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"runtime"
+	"time"
 
 	"go.temporal.io/sdk/log"
 )
@@ -38,14 +40,33 @@ func (l *TemporalSlogLogger) WithCallerSkip(skip int) log.Logger {
 	return &cp
 }
 
-func (l *TemporalSlogLogger) Debug(msg string, keyvals ...interface{}) { l.log(slog.LevelDebug, msg, keyvals...) }
-func (l *TemporalSlogLogger) Info(msg string, keyvals ...interface{})  { l.log(slog.LevelInfo, msg, keyvals...) }
-func (l *TemporalSlogLogger) Warn(msg string, keyvals ...interface{})  { l.log(slog.LevelWarn, msg, keyvals...) }
-func (l *TemporalSlogLogger) Error(msg string, keyvals ...interface{}) { l.log(slog.LevelError, msg, keyvals...) }
+func (l *TemporalSlogLogger) Debug(msg string, keyvals ...interface{}) {
+	l.log(slog.LevelDebug, msg, keyvals...)
+}
+func (l *TemporalSlogLogger) Info(msg string, keyvals ...interface{}) {
+	l.log(slog.LevelInfo, msg, keyvals...)
+}
+func (l *TemporalSlogLogger) Warn(msg string, keyvals ...interface{}) {
+	l.log(slog.LevelWarn, msg, keyvals...)
+}
+func (l *TemporalSlogLogger) Error(msg string, keyvals ...interface{}) {
+	l.log(slog.LevelError, msg, keyvals...)
+}
 
 func (l *TemporalSlogLogger) log(level slog.Level, msg string, keyvals ...interface{}) {
 	args := append(append([]any(nil), l.prefix...), normalizeKeyvals(keyvals)...)
-	l.logger.Log(context.Background(), level, msg, args...)
+
+	// Build a record with an adjusted PC so slog's AddSource reports the workflow/activity
+	// callsite (not this adapter). slog.Logger doesn't support caller skip directly.
+	ctx := context.Background()
+	if !l.logger.Enabled(ctx, level) {
+		return
+	}
+
+	pc := callerPC(4 + l.callerSkip)
+	r := slog.NewRecord(time.Now(), level, msg, pc)
+	r.Add(args...)
+	_ = l.logger.Handler().Handle(ctx, r)
 }
 
 func normalizeKeyvals(keyvals []interface{}) []any {
@@ -71,3 +92,16 @@ func normalizeKeyvals(keyvals []interface{}) []any {
 	return out
 }
 
+func callerPC(skip int) uintptr {
+	// runtime.Callers skip:
+	// 0 -> runtime.Callers
+	// 1 -> callerPC
+	// 2 -> TemporalSlogLogger.log
+	// 3 -> TemporalSlogLogger.{Debug,Info,Warn,Error}
+	// 4 -> the workflow/activity callsite
+	pcs := make([]uintptr, 1)
+	if n := runtime.Callers(skip, pcs); n < 1 {
+		return 0
+	}
+	return pcs[0]
+}
