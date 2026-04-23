@@ -185,10 +185,10 @@ func (a *Activity) typeSingleField(page *rod.Page, field FieldInput) error {
 		return fmt.Errorf("failed to get tagged nodes: %w", err)
 	}
 
-	if field.ElementIndex < 0 || field.ElementIndex >= len(taggedNodes) {
-		return fmt.Errorf("element index %d out of range (0-%d)",
-			field.ElementIndex, len(taggedNodes)-1)
-	}
+	// if field.ElementIndex < 0 || field.ElementIndex >= len(taggedNodes) {
+	// 	return fmt.Errorf("element index %d out of range (0-%d)",
+	// 		field.ElementIndex, len(taggedNodes)-1)
+	// }
 
 	element := taggedNodes[field.ElementIndex].Element
 	if element == nil {
@@ -499,9 +499,9 @@ func (a *Activity) resolveElement(page *rod.Page, elementIndex int) (*rod.Elemen
 		return nil, fmt.Errorf("failed to get tagged nodes: %w", err)
 	}
 
-	if elementIndex < 0 || elementIndex >= len(taggedNodes) {
-		return nil, fmt.Errorf("element index %d out of range (0-%d)", elementIndex, len(taggedNodes)-1)
-	}
+	// if elementIndex < 0 || elementIndex >= len(taggedNodes) {
+	// 	return nil, fmt.Errorf("element index %d out of range (0-%d)", elementIndex, len(taggedNodes)-1)
+	// }
 
 	element := taggedNodes[elementIndex].Element
 	if element == nil {
