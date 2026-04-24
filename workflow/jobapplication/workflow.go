@@ -42,7 +42,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	var jobDetails JobDetails
 
 	sessionCtx, err := workflow.CreateSession(ctx, &workflow.SessionOptions{
-		ExecutionTimeout: 30 * time.Minute,
+		ExecutionTimeout: 24 * time.Hour,
 		CreationTimeout:  time.Minute,
 	})
 	if err != nil {
