@@ -60,6 +60,13 @@ func HandleUserActionWorkflow(ctx workflow.Context, input HandleUserActionWorkfl
 		return nil, err
 	}
 
+	// Fetch job application for context
+	jobApplication, err := getJobApplication(ctx, input.IdJobApplication)
+	if err != nil {
+		logger.Error("Failed to fetch job application", "error", err)
+		return nil, err
+	}
+
 	// Take screenshot of current page
 	screenshot, err := takeScreenshot(ctx, input.WorkflowID)
 	if err != nil {
@@ -67,8 +74,8 @@ func HandleUserActionWorkflow(ctx workflow.Context, input HandleUserActionWorkfl
 		return nil, err
 	}
 
-	// Call LLM to build the user action layout from the screenshot
-	layout, err := buildUserActionLayout(ctx, screenshot.Path, input.UserAction, input.ActionDetails, input.IdUser, input.IdJobApplication)
+	// Call LLM to build the user action layout and form description from the screenshot
+	formDescription, layout, err := buildUserActionLayout(ctx, screenshot.Path, input.UserAction, input.ActionDetails, jobApplication.JobTitle, jobApplication.CompanyName, input.IdUser, input.IdJobApplication)
 	if err != nil {
 		logger.Error("Failed to build user action layout", "error", err)
 		return nil, err
@@ -86,7 +93,7 @@ func HandleUserActionWorkflow(ctx workflow.Context, input HandleUserActionWorkfl
 		UserId:           input.IdUser,
 		JobApplicationId: input.IdJobApplication,
 		UserActionType:   input.UserAction,
-		ActionDetails:    input.ActionDetails,
+		ActionDetails:    formDescription,
 		WorkflowID:       childWorkflowID,
 		Layout:           layout,
 	})
@@ -95,18 +102,11 @@ func HandleUserActionWorkflow(ctx workflow.Context, input HandleUserActionWorkfl
 		return nil, err
 	}
 
-	// Fetch job application for notification context
-	jobApplication, err := getJobApplication(ctx, input.IdJobApplication)
-	if err != nil {
-		logger.Error("Failed to fetch job application", "error", err)
-		return nil, err
-	}
-
 	// Notify user
 	if err := notifyUser(ctx, input.IdUser, notifyUserInput{
 		UserActionID:   userAction.IdUserAction,
 		UserActionType: input.UserAction,
-		ActionDetails:  input.ActionDetails,
+		ActionDetails:  formDescription,
 		Layout:         layout,
 		WorkflowID:     childWorkflowID,
 		SignalName:     signalName,
@@ -161,46 +161,56 @@ func takeScreenshot(ctx workflow.Context, workflowID string) (browser.TakeScreen
 	return output, err
 }
 
-func buildUserActionLayout(ctx workflow.Context, screenshotPath string, userAction string, actionDetails string, idUser uint, idJobApplication uint) (sqldb.UserActionLayout, error) {
+func buildUserActionLayout(ctx workflow.Context, screenshotPath string, userAction string, actionDetails string, jobTitle string, companyName string, idUser uint, idJobApplication uint) (string, sqldb.UserActionLayout, error) {
 	promptData := struct {
 		UserAction    string
 		ActionDetails string
+		JobTitle      string
+		CompanyName   string
 	}{
 		UserAction:    userAction,
 		ActionDetails: actionDetails,
+		JobTitle:      jobTitle,
+		CompanyName:   companyName,
 	}
 
 	var buf bytes.Buffer
 	if err := SystemTemplate.Execute(&buf, promptData); err != nil {
-		return nil, fmt.Errorf("render system prompt: %w", err)
+		return "", nil, fmt.Errorf("render system prompt: %w", err)
 	}
 
 	screenshotBase64, err := getBase64Screenshot(screenshotPath)
 	if err != nil {
-		return nil, fmt.Errorf("encode screenshot: %w", err)
+		return "", nil, fmt.Errorf("encode screenshot: %w", err)
 	}
+
+	var temperaturePtr float64 = 0.3
 
 	llmRequest := types.AIPIRequest{
 		SystemMessage:    buf.String(),
-		UserMessage:      "Analyze the screenshot and return the form layout as a JSON array.",
+		UserMessage:      "Analyze the screenshot and return the form description and layout.",
 		ImageUrl:         &screenshotBase64,
 		Model:            "x-ai/grok-4.1-fast",
-		ResponseSchema:   getUserActionLayoutSchema(),
+		ResponseSchema:   getUserActionResponseSchema(),
 		IdUser:           idUser,
 		IdJobApplication: &idJobApplication,
+		Temperature:      &temperaturePtr,
 	}
 
 	var llmResponse types.AIPIResponse
 	if err := workflow.ExecuteActivity(ctx, "CallLLM", llmRequest).Get(ctx, &llmResponse); err != nil {
-		return nil, fmt.Errorf("LLM call failed: %w", err)
+		return "", nil, fmt.Errorf("LLM call failed: %w", err)
 	}
 
-	var layout sqldb.UserActionLayout
-	if err := json.Unmarshal([]byte(llmResponse.Content), &layout); err != nil {
-		return nil, fmt.Errorf("parse LLM response: %w", err)
+	var response struct {
+		FormDescription string                 `json:"form_description"`
+		Layout          sqldb.UserActionLayout `json:"layout"`
+	}
+	if err := json.Unmarshal([]byte(llmResponse.Content), &response); err != nil {
+		return "", nil, fmt.Errorf("parse LLM response: %w", err)
 	}
 
-	return layout, nil
+	return response.FormDescription, response.Layout, nil
 }
 
 func createUserAction(ctx workflow.Context, input sqldb.CreateUserActionInput) (sqldb.UserAction, error) {
@@ -272,39 +282,56 @@ func getBase64Screenshot(screenshotPath string) (string, error) {
 	return fmt.Sprintf("data:image/jpeg;base64,%s", base64.StdEncoding.EncodeToString(data)), nil
 }
 
-func getUserActionLayoutSchema() map[string]interface{} {
+func getUserActionResponseSchema() map[string]interface{} {
 	return map[string]interface{}{
-		"type": "array",
-		"items": map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"field_name": map[string]interface{}{
-					"type":        "string",
-					"description": "Human-readable label for the field",
-				},
-				"type": map[string]interface{}{
-					"anyOf": []map[string]interface{}{
-						{"type": "string"},
-						{"type": "null"},
+		"type": "object",
+		"properties": map[string]interface{}{
+			"form_description": map[string]interface{}{
+				"type":        "string",
+				"description": "Plain-text description (no tags, max 3 lines) of what the user needs to do",
+			},
+			"layout": map[string]interface{}{
+				"type": "array",
+				"items": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"field_name": map[string]interface{}{
+							"type":        "string",
+							"description": "Human-readable label for the field",
+						},
+						"description": map[string]interface{}{
+							"anyOf": []map[string]interface{}{
+								{"type": "string"},
+								{"type": "null"},
+							},
+							"description": "Short context about what this field is asking, assuming the user hasn't read the job description. Null for self-explanatory fields.",
+						},
+						"type": map[string]interface{}{
+							"anyOf": []map[string]interface{}{
+								{"type": "string"},
+								{"type": "null"},
+							},
+							"description": "HTML input type (text, password, email, etc.)",
+						},
+						"component": map[string]interface{}{
+							"anyOf": []map[string]interface{}{
+								{"type": "string"},
+								{"type": "null"},
+							},
+							"description": "UI component type (input, textarea, select, radio, checkbox)",
+						},
+						"options": map[string]interface{}{
+							"anyOf": []map[string]interface{}{
+								{"type": "array", "items": map[string]interface{}{"type": "string"}},
+								{"type": "null"},
+							},
+							"description": "Available options for select/radio/checkbox fields",
+						},
 					},
-					"description": "HTML input type (text, password, email, etc.)",
-				},
-				"component": map[string]interface{}{
-					"anyOf": []map[string]interface{}{
-						{"type": "string"},
-						{"type": "null"},
-					},
-					"description": "UI component type (input, textarea, select, radio, checkbox)",
-				},
-				"options": map[string]interface{}{
-					"anyOf": []map[string]interface{}{
-						{"type": "array", "items": map[string]interface{}{"type": "string"}},
-						{"type": "null"},
-					},
-					"description": "Available options for select/radio/checkbox fields",
+					"required": []string{"field_name", "description", "type", "component", "options"},
 				},
 			},
-			"required": []string{"field_name", "type", "component", "options"},
 		},
+		"required": []string{"form_description", "layout"},
 	}
 }

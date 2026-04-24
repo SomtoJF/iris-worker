@@ -1,17 +1,29 @@
 <task>
-You are analyzing a screenshot of a web page or form field that is blocking an automated job application. The page requires human intervention. Your job is to identify the form fields the user needs to fill out and return a structured layout describing those fields.
+You are analyzing a screenshot of a web page or form field that is blocking an automated job application. The page requires human intervention. Your job is to:
+1. Write a clear, plain-text description of what the user needs to do (form_description)
+2. Identify the form fields the user needs to fill out and return a structured layout
 </task>
 
 <context>
 User action type: {{.UserAction}}
 Action details: {{.ActionDetails}}
+Job title: {{.JobTitle}}
+Company: {{.CompanyName}}
 </context>
 
 <instructions>
-Analyze the screenshot and identify all form fields the user needs to interact with to resolve the issue outlined in the action details. The scope of your should be limited to the action details.
+## Form Description (form_description)
+Write a short plain-text description (1-3 lines max) telling the user what they need to do. Rules:
+- No XML, HTML, or any other tags
+- Must be easy to understand for a non-technical user
+- Be specific about what is needed
+
+## Form Layout (layout)
+Analyze the screenshot and identify all form fields the user needs to interact with to resolve the issue outlined in the action details. The scope should be limited to the action details.
 
 For each field, provide:
 - field_name: A human-readable label for the field (e.g. "Username", "Password", "OTP Code", "Do you have any pets?")
+- description: A short plain-text explanation (1-2 sentences) giving the user context about what this field is asking. Assume the user has NOT read the job description at all. Include relevant details like the country, role specifics, or company context. Set to null for self-explanatory fields like "Email", "OTP Code", or "Phone Number".
 - type: The HTML input type if applicable (e.g. "text", "password", "number", "email", "tel"). Null if not an input.
 - component: The UI component type (e.g. "input", "textarea", "select", "radio", "checkbox"). Null if unknown.
 - options: For select/radio/checkbox fields, provide the available options as an array. Null otherwise.
@@ -31,29 +43,58 @@ Common patterns by action type:
 </instructions>
 
 <few_shot_examples>
-Example 1 — OTP (keep it one field):
+Example 1 — OTP:
 Screenshot shows a single "Enter verification code" box.
-[
-  {"field_name": "OTP Verification code", "type": "text", "component": "input", "options": null}
-]
+{
+  "form_description": "A verification code was sent to your email. Please enter it below to continue with your application.",
+  "layout": [
+    {"field_name": "OTP Verification code", "description": null, "type": "text", "component": "input", "options": null}
+  ]
+}
 
+Example 2 — Visa sponsorship question:
+Screenshot shows a radio asking "Will you now or in the future require sponsorship for employment visa status?"
+{
+  "form_description": "The application needs a few more details about your work eligibility.",
+  "layout": [
+    {"field_name": "Will you require visa sponsorship?", "description": "This role is based in the United States. The employer wants to know if you will need work visa sponsorship to be employed there.", "type": null, "component": "radio", "options": ["Yes", "No"]}
+  ]
+}
 
-Example 2 — Additional Info:
+Example 3 — Additional Info with country dropdown:
 Screenshot shows a dropdown labeled "Country" with listed countries.
-[
-  {"field_name": "Country", "type": null, "component": "select", "options": ["United States", "Canada", "United Kingdom"]}
-]
+{
+  "form_description": "The application requires you to select your country of origin.",
+  "layout": [
+    {"field_name": "Country", "description": null, "type": null, "component": "select", "options": ["United States", "Canada", "United Kingdom"]}
+  ]
+}
 List options only when they are clearly visible; otherwise prefer a single simple `input` that matches the page.
+
+Example 4 — Work authorization:
+Screenshot shows "Are you legally authorized to work in Germany?" with Yes/No radio buttons.
+{
+  "form_description": "The application needs to verify your work authorization status.",
+  "layout": [
+    {"field_name": "Are you legally authorized to work in Germany?", "description": "This position is located in Germany. The employer needs to confirm you can legally work there.", "type": null, "component": "radio", "options": ["Yes", "No"]}
+  ]
+}
 </few_shot_examples>
 
 <response_format>
-Respond with a JSON array of field objects. Example:
-[
-  {"field_name": "Email", "type": "email", "component": "input", "options": null},
-  {"field_name": "Password", "type": "password", "component": "input", "options": null},
-  {"field_name": "Work authorization status", "type": null, "component": "select", "options": ["Citizen", "Permanent resident", "Work visa", "Not authorized"]} 
-]
+Respond with a JSON object containing form_description and layout. Example:
+{
+  "form_description": "The application requires some additional information to proceed.",
+  "layout": [
+    {"field_name": "Email", "description": null, "type": "email", "component": "input", "options": null},
+    {"field_name": "Work authorization status", "description": "This role is at {{.CompanyName}} and requires you to confirm your eligibility to work in the relevant country.", "type": null, "component": "select", "options": ["Citizen", "Permanent resident", "Work visa", "Not authorized"]}
+  ]
+}
 
-If the page has no identifiable form fields (e.g. a pure CAPTCHA image with no input), return a single field:
-[{"field_name": "CAPTCHA Solution", "type": "text", "component": "input", "options": null}]
+If the page has no identifiable form fields (e.g. a pure CAPTCHA image with no input), return:
+{
+  "form_description": "Please solve the CAPTCHA to continue with your application.",
+  "layout": [{"field_name": "CAPTCHA Solution", "description": null, "type": "text", "component": "input", "options": null}]
+}
 </response_format>
+</invoke>

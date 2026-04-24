@@ -12,10 +12,11 @@ import (
 // ====== TYPES ======
 
 type UserActionLayoutItem struct {
-	Type      *string   `json:"type"`
-	FieldName string    `json:"field_name"`
-	Component *string   `json:"component"`
-	Options   *[]string `json:"options"`
+	Type        *string   `json:"type"`
+	FieldName   string    `json:"field_name"`
+	Description *string   `json:"description"`
+	Component   *string   `json:"component"`
+	Options     *[]string `json:"options"`
 }
 
 type UserActionResultItem struct {
