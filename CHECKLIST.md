@@ -53,6 +53,8 @@
 - [ x ] Add and Display failure reasons for each application.
 - [ x ] Add linkedin url to application profile
 - [ x ] Increase job application workflow timeout to 6 hours. No timer on user action workflow
+- [ x ] In job search results, distinguish between applied jobs and non applied jobs
+- [ ] In handle user action, descriptions to the user must not include tags. Must not be more than 3 line long and must be easy to understand.
 - [ ] Implement email notifications on successful/failed applications and user action required. (Mailjet)
 - [ ] Add truthfulness clause to the planner prompt. The LLM must not lie and if the application requires that you provide information that will contradict user provided data, fail it.
 - [ ] Viewing application data for each application

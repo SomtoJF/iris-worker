@@ -319,12 +319,15 @@ func planNextAction(ctx workflow.Context, input PlannerRequest) (PlannerResponse
 		return PlannerResponse{}, err
 	}
 
+	var temperaturePtr float64 = 0.2
+
 	llmRequest := types.AIPIRequest{
 		SystemMessage:    systemPrompt,
 		UserMessage:      userPrompt,
 		ImageUrl:         &screenshotBase64,
 		Model:            "x-ai/grok-4.1-fast",
 		ResponseSchema:   getPlannerResponseSchema(),
+		Temperature:      &temperaturePtr,
 		IdUser:           input.IdUser,
 		IdJobApplication: &input.IdJobApplication,
 	}
