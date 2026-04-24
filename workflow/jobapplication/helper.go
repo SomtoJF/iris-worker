@@ -14,6 +14,7 @@ import (
 	"github.com/SomtoJF/iris-worker/browserfactory"
 	"github.com/SomtoJF/iris-worker/helper"
 	"github.com/SomtoJF/iris-worker/shared"
+	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/workflow"
 )
 
@@ -356,7 +357,10 @@ func executeToolCall(ctx workflow.Context, workflowID string, userID uint, idJob
 	resp := make(map[string]interface{})
 	var err error
 	if toolItem.IsWorkflow {
-		err = workflow.ExecuteChildWorkflow(ctx, toolItem.TemporalString, toolCall.Arguments).Get(ctx, &resp)
+		childCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
+			ParentClosePolicy: enumspb.PARENT_CLOSE_POLICY_REQUEST_CANCEL,
+		})
+		err = workflow.ExecuteChildWorkflow(childCtx, toolItem.TemporalString, toolCall.Arguments).Get(ctx, &resp)
 	} else {
 		err = workflow.ExecuteActivity(ctx, toolItem.TemporalString, toolCall.Arguments).Get(ctx, &resp)
 	}

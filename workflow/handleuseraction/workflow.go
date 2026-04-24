@@ -38,8 +38,6 @@ type HandleUserActionWorkflowInput struct {
 
 const signalName = "USER_ACTION_RESULT"
 
-const USER_ACTION_TIMEOUT = 15 * time.Minute
-
 func HandleUserActionWorkflow(ctx workflow.Context, input HandleUserActionWorkflowInput) (map[string]interface{}, error) {
 	logger := workflow.GetLogger(ctx)
 	logger.Info("HandleUserActionWorkflow started", "input", input)
@@ -120,10 +118,10 @@ func HandleUserActionWorkflow(ctx workflow.Context, input HandleUserActionWorkfl
 		return nil, err
 	}
 
-	// Wait for user action signal with 10-minute timeout
+	// Wait for user action signal (indefinitely; canceled when parent closes)
 	result, err := waitForUserAction(ctx)
 	if err != nil {
-		logger.Error("Timeout or error waiting for user action", "error", err)
+		logger.Error("Canceled or error waiting for user action", "error", err)
 		return nil, err
 	}
 
@@ -245,7 +243,6 @@ func notifyUser(ctx workflow.Context, userID uint, input notifyUserInput) error 
 
 func waitForUserAction(ctx workflow.Context) (sqldb.UserActionResult, error) {
 	signalChan := workflow.GetSignalChannel(ctx, signalName)
-	timerChan := workflow.NewTimer(ctx, USER_ACTION_TIMEOUT)
 
 	var result sqldb.UserActionResult
 	selector := workflow.NewSelector(ctx)
@@ -255,11 +252,14 @@ func waitForUserAction(ctx workflow.Context) (sqldb.UserActionResult, error) {
 		c.Receive(ctx, &result)
 		signalReceived = true
 	})
-	selector.AddFuture(timerChan, func(f workflow.Future) {})
+	selector.AddReceive(ctx.Done(), func(c workflow.ReceiveChannel, more bool) {})
 	selector.Select(ctx)
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if !signalReceived {
-		return nil, fmt.Errorf("timeout waiting for user action after %s", USER_ACTION_TIMEOUT)
+		return nil, fmt.Errorf("no user action signal received")
 	}
 	return result, nil
 }
