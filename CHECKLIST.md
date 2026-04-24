@@ -51,6 +51,10 @@
   - Upvote
 - [ x ] Sync Job Search with url search params
 - [ x ] Add and Display failure reasons for each application.
+- [ ] Add linkedin url to application profile
+- [ ] Increase job application workflow timeout to 6 hours. No timer on user action workflow
+- [ ] Implement email notifications on successful/failed applications and user action required. (Mailjet)
+- [ ] Add truthfulness clause to the planner prompt. The LLM must not lie and if the application requires that you provide information that will contradict user provided data, fail it.
 - [ ] Viewing application data for each application
 - [ ] Finish All Issues Feed
 - [ ] Figure out captcha solving
