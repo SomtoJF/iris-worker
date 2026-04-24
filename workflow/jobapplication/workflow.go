@@ -122,7 +122,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 
 	isApplicationComplete := false
 	toolCallHistory := []ToolCallResult{}
-	const maxAgentIterations = 30
+	const maxAgentIterations = 50
 
 	for iteration := 0; !isApplicationComplete && iteration < maxAgentIterations; iteration++ {
 		var screenshot browser.TakeScreenshotOutput
