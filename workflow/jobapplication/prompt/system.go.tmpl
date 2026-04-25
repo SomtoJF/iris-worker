@@ -197,11 +197,11 @@ The action_history array is an array of objects with the following properties:
    - Another use case for when this is useful is when you type in a field and you see that the text hasnt been input correctly. You can use the input_text tool to with the replace argument set to true to replace the text with the correct text.
 
 7. **Comboboxes, Radio Buttons and Dropdowns**:
-   - Never try to type directly into a combobox, radio button or custom dropdown — always interact with it like a human would.
-   - First, click the combobox, radio button or dropdown trigger/flyout (the element that opens/expands it) to reveal its options.
-   - Once the flyout or options list appears, find the desired option, then click it directly.
-   - Do not attempt to use input_text or input_multiple on a combobox, radio button or dropdown element. Always use click to open and then click again to select the option.
-   - If the options list does not appear after clicking, try clicking the dropdown arrow or trigger icon associated with the combobox, radio button or dropdown.
+   - **Combobox hard rule**: Never use `input_multiple` for any combobox field (including searchable comboboxes). Selection is `click`; filtering is a single `input_text` on the combobox text entry only—do not bundle a combobox with other fields in one `input_multiple` call.
+   - **Radio groups**: Use `click` on the correct radio option only. Do not use `input_text` or `input_multiple` on radio controls.
+   - **Dropdowns and comboboxes (default path)**: Click the trigger or focus the control to open the list. If a visible options list appears, `click` the correct option.
+   - **Searchable / editable combobox (only when needed)**: If after opening or focusing there is **no usable options list** (empty panel, only a text cursor with no suggestions, or list stays empty), treat it as filter-as-you-type: use **`input_text`** once on the tagged node that is clearly the combobox **text input** (minimal text to surface the match), then on a **later response** use **`click`** on the matching suggestion row. Respect one tool call per response (open → type filter → click result are separate steps).
+   - **Recovery (combobox / dropdown only)**: If the list still does not appear, try the dropdown arrow or alternate trigger icon for that control.
 
 8. **Error Recovery**:
    - If a tool call fails, analyze the error and try alternative approaches
@@ -261,5 +261,5 @@ You must respond with a JSON object containing:
 8. If the application asks for a cover letter, use the write_cover_letter tool to generate one.
 9. File uploads MUST strictly be based on the file_input_index provided in the prompt. DO NOT use the index number of the interactive elements to upload files. It will fail.
 10. Constrained options truthfulness: for required fields with explicit choices (radio/select/combobox options), never select an option that contradicts known candidate facts from <candidate_profile>, <candidate_resume>, or action_history; request missing info via handle_user_action when needed; fail only when no option can be chosen truthfully.
-11. Combobox/radio/dropdown filling: never type into these controls; click to open/expand, then click the correct option; do not use input_text or input_multiple on these elements.
+11. Comboboxes and dropdowns: click-first to open, then click the option. Never use `input_multiple` on comboboxes. If no list appears after open/focus, use `input_text` only on the combobox text entry to filter, then `click` the result (one tool per response). Radios: `click` only—no `input_text` / `input_multiple` on radio controls.
 </rules>
