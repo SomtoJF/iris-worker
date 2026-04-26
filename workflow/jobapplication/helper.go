@@ -10,6 +10,7 @@ import (
 	"text/template"
 
 	s3activity "github.com/SomtoJF/iris-worker/activity/s3"
+	"github.com/SomtoJF/iris-worker/activity/sqldb"
 	"github.com/SomtoJF/iris-worker/aipi/types"
 	"github.com/SomtoJF/iris-worker/browserfactory"
 	"github.com/SomtoJF/iris-worker/helper"
@@ -555,4 +556,48 @@ func loadResumeIntoMemory(ctx workflow.Context, filename string, fileKey string)
 	}
 
 	return output.Path, nil
+}
+
+func deduplicateQA(ctx workflow.Context, idUser uint, idJobApplication uint, questions []sqldb.JobApplicationQuestion) ([]sqldb.JobApplicationQuestion, error) {
+	questionsJSON, err := json.Marshal(questions)
+	if err != nil {
+		return nil, fmt.Errorf("marshal questions: %w", err)
+	}
+
+	llmRequest := types.AIPIRequest{
+		SystemMessage: "You are cleaning up job application form Q&A pairs.\n\nTask: Deduplicate the list by merging ONLY entries that clearly refer to the exact same underlying question but use different wording (label drift).\n\nHard rules:\n- Be conservative: if you are not confident two questions are the same, DO NOT merge.\n- Never merge questions that differ in intent (e.g. \"Phone\" vs \"Mobile phone\", \"Location\" vs \"Willing to relocate\", \"Work authorization\" vs \"Visa sponsorship\").\n- Never invent new answers or modify answers.\n- Prefer keeping separate entries over incorrect merges.\n\nWhen you do merge:\n- Keep the most descriptive/clear question text.\n- If the answers are identical (ignoring case/whitespace), keep one.\n- If answers differ, only choose one if you can justify they are the same value in different formatting (e.g. \"Yes\" vs \"yes\", phone formatting). Otherwise keep BOTH as separate entries.\n\nReturn ONLY valid JSON matching the schema.",
+		UserMessage:   string(questionsJSON),
+		Model:         "google/gemma-4-31b-it:free",
+		ResponseSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"questions": map[string]interface{}{
+					"type": "array",
+					"items": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"question": map[string]interface{}{"type": "string"},
+							"answer":   map[string]interface{}{"type": "string"},
+						},
+						"required": []string{"question", "answer"},
+					},
+				},
+			},
+			"required": []string{"questions"},
+		},
+		IdUser:           idUser,
+		IdJobApplication: &idJobApplication,
+	}
+
+	var llmResponse types.AIPIResponse
+	if err := workflow.ExecuteActivity(ctx, "CallLLM", llmRequest).Get(ctx, &llmResponse); err != nil {
+		return nil, fmt.Errorf("CallLLM: %w", err)
+	}
+
+	var resp deduplicateQAResponse
+	if err := json.Unmarshal([]byte(llmResponse.Content), &resp); err != nil {
+		return nil, fmt.Errorf("unmarshal dedup response: %w", err)
+	}
+
+	return resp.Questions, nil
 }

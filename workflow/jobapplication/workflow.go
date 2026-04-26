@@ -204,7 +204,17 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 
 	handleApplicationSuccess(ctx, input, jobDetails)
 
-	if err := saveApplicationData(ctx, input.IdUser, input.IdJobApplication, userResume.IdResume, coverLetter, qaMap); err != nil {
+	questions := mapToQuestions(qaMap)
+	if len(questions) > 0 {
+		deduped, err := deduplicateQA(ctx, input.IdUser, input.IdJobApplication, questions)
+		if err != nil {
+			logger.Warn("Failed to deduplicate Q&A, saving raw", "error", err)
+		} else {
+			questions = deduped
+		}
+	}
+
+	if err := saveApplicationData(ctx, input.IdUser, input.IdJobApplication, userResume.IdResume, coverLetter, questions); err != nil {
 		logger.Error("Failed to save application data", "error", err)
 	}
 
@@ -278,12 +288,15 @@ func updateJobApplicationStatus(ctx workflow.Context, idJobApplication uint, sta
 	}).Get(ctx, nil)
 }
 
-func saveApplicationData(ctx workflow.Context, idUser, idJobApplication, idResume uint, coverLetter *string, qaMap map[string]string) error {
+func mapToQuestions(qaMap map[string]string) []sqldb.JobApplicationQuestion {
 	questions := make([]sqldb.JobApplicationQuestion, 0, len(qaMap))
 	for q, a := range qaMap {
 		questions = append(questions, sqldb.JobApplicationQuestion{Question: q, Answer: a})
 	}
+	return questions
+}
 
+func saveApplicationData(ctx workflow.Context, idUser, idJobApplication, idResume uint, coverLetter *string, questions []sqldb.JobApplicationQuestion) error {
 	return workflow.ExecuteActivity(ctx, "CreateJobApplicationData", sqldb.CreateJobApplicationDataInput{
 		IdUser:           idUser,
 		IdJobApplication: idJobApplication,
@@ -291,6 +304,10 @@ func saveApplicationData(ctx workflow.Context, idUser, idJobApplication, idResum
 		CoverLetter:      coverLetter,
 		Questions:        questions,
 	}).Get(ctx, nil)
+}
+
+type deduplicateQAResponse struct {
+	Questions []sqldb.JobApplicationQuestion `json:"questions"`
 }
 
 func updateJobApplication(ctx workflow.Context, idJobApplication uint, data map[string]interface{}) error {

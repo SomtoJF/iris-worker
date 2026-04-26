@@ -84,7 +84,7 @@ func JobDiscoveryWorkflow(ctx workflow.Context, input JobDiscoveryWorkflowInput)
 	llmRequest := types.AIPIRequest{
 		SystemMessage:  systemPrompt,
 		UserMessage:    userPrompt,
-		Model:          "x-ai/grok-4.1-fast",
+		Model:          "gemma-4-31b-it:free",
 		ResponseSchema: discoveredJobsResponseSchema(),
 		IdUser:         input.IdUser,
 	}
@@ -199,7 +199,7 @@ func discoveredJobsResponseSchema() map[string]interface{} {
 							"description": "Date the job was posted in YYYY-MM-DD format",
 						},
 					},
-					"required": []string{"title", "url", "company_name"},
+					"required": []string{"title", "url", "company_name", "date_posted"},
 				},
 			},
 		},
