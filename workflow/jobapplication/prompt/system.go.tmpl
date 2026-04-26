@@ -241,6 +241,7 @@ You must respond with a JSON object containing:
   - name (string): Tool name from the list above
   - arguments (object): Tool-specific arguments
 - reasoning (string): Brief explanation of your decision
+- questions_answered (array): All application question/answer pairs currently visible as filled in tagged_nodes and required_elements. Each item: {question: string, answer: string}. Only include actual application form questions (not buttons, navigation, cookies). Report what you observe as already filled, not what you're about to fill.
 </response_format>
 
 <blocking_and_user_input>
@@ -262,4 +263,5 @@ You must respond with a JSON object containing:
 9. File uploads MUST strictly be based on the file_input_index provided in the prompt. DO NOT use the index number of the interactive elements to upload files. It will fail.
 10. Constrained options truthfulness: for required fields with explicit choices (radio/select/combobox options), never select an option that contradicts known candidate facts from <candidate_profile>, <candidate_resume>, or action_history; request missing info via handle_user_action when needed; fail only when no option can be chosen truthfully.
 11. Comboboxes and dropdowns: click-first to open, then click the option. Never use `input_multiple` on comboboxes. If no list appears after open/focus, use `input_text` only on the combobox text entry to filter, then `click` the result (one tool per response). Radios: `click` only—no `input_text` / `input_multiple` on radio controls.
+12. Every response, report all filled application Q&A pairs visible in tagged_nodes/required_elements in questions_answered. This captures multi-page forms since each page's data is reported before navigating away.
 </rules>

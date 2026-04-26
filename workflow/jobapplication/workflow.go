@@ -122,6 +122,8 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 
 	isApplicationComplete := false
 	toolCallHistory := []ToolCallResult{}
+	qaMap := make(map[string]string)
+	var coverLetter *string
 	const maxAgentIterations = 50
 
 	for iteration := 0; !isApplicationComplete && iteration < maxAgentIterations; iteration++ {
@@ -170,6 +172,12 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 			return fmt.Errorf("%s", failureReason)
 		}
 
+		for _, qa := range plannerResponse.QuestionsAnswered {
+			if qa.Question != "" && qa.Answer != "" {
+				qaMap[qa.Question] = qa.Answer
+			}
+		}
+
 		isApplicationComplete = plannerResponse.IsApplicationComplete
 		if isApplicationComplete {
 			break
@@ -178,6 +186,12 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		if plannerResponse.ToolCall != nil {
 			result := executeToolCall(sessionCtx, workflowId, input.IdUser, input.IdJobApplication, *plannerResponse.ToolCall)
 			toolCallHistory = append(toolCallHistory, result)
+
+			if plannerResponse.ToolCall.Name == "write_cover_letter" {
+				if cl, ok := result.Result["cover_letter"].(string); ok {
+					coverLetter = &cl
+				}
+			}
 		}
 	}
 
@@ -189,6 +203,10 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	}
 
 	handleApplicationSuccess(ctx, input, jobDetails)
+
+	if err := saveApplicationData(ctx, input.IdUser, input.IdJobApplication, userResume.IdResume, coverLetter, qaMap); err != nil {
+		logger.Error("Failed to save application data", "error", err)
+	}
 
 	return nil
 }
@@ -257,6 +275,21 @@ func updateJobApplicationStatus(ctx workflow.Context, idJobApplication uint, sta
 			"status":         status,
 			"failure_reason": failureReason,
 		},
+	}).Get(ctx, nil)
+}
+
+func saveApplicationData(ctx workflow.Context, idUser, idJobApplication, idResume uint, coverLetter *string, qaMap map[string]string) error {
+	questions := make([]sqldb.JobApplicationQuestion, 0, len(qaMap))
+	for q, a := range qaMap {
+		questions = append(questions, sqldb.JobApplicationQuestion{Question: q, Answer: a})
+	}
+
+	return workflow.ExecuteActivity(ctx, "CreateJobApplicationData", sqldb.CreateJobApplicationDataInput{
+		IdUser:           idUser,
+		IdJobApplication: idJobApplication,
+		IdResume:         idResume,
+		CoverLetter:      coverLetter,
+		Questions:        questions,
 	}).Get(ctx, nil)
 }
 

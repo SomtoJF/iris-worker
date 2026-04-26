@@ -40,12 +40,18 @@ type ToolCallResult struct {
 	Error  error                  `json:"error,omitempty"`
 }
 
+type QuestionAnswer struct {
+	Question string `json:"question"`
+	Answer   string `json:"answer"`
+}
+
 type PlannerResponse struct {
-	IsApplicationComplete bool      `json:"is_application_complete"`
-	IsApplicationFailed   bool      `json:"is_application_failed"`
-	FailureReason         *string   `json:"failure_reason,omitempty"`
-	ToolCall              *ToolCall `json:"tool_call,omitempty"`
-	Reasoning             string    `json:"reasoning,omitempty"`
+	IsApplicationComplete bool             `json:"is_application_complete"`
+	IsApplicationFailed   bool             `json:"is_application_failed"`
+	FailureReason         *string          `json:"failure_reason,omitempty"`
+	ToolCall              *ToolCall        `json:"tool_call,omitempty"`
+	Reasoning             string           `json:"reasoning,omitempty"`
+	QuestionsAnswered     []QuestionAnswer `json:"questions_answered,omitempty"`
 }
 
 type PlannerRequest struct {
@@ -428,8 +434,26 @@ func getPlannerResponseSchema() map[string]interface{} {
 				"type":        "string",
 				"description": "Brief explanation of the decision and next action",
 			},
+			"questions_answered": map[string]interface{}{
+				"type":        "array",
+				"description": "All application question/answer pairs currently visible as filled in tagged_nodes and required_elements. Only include actual application form questions, not buttons or navigation.",
+				"items": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"question": map[string]interface{}{
+							"type":        "string",
+							"description": "The form field label or question text",
+						},
+						"answer": map[string]interface{}{
+							"type":        "string",
+							"description": "The value filled in the field",
+						},
+					},
+					"required": []string{"question", "answer"},
+				},
+			},
 		},
-		"required": []string{"is_application_complete", "is_application_failed", "failure_reason", "reasoning", "tool_call"},
+		"required": []string{"is_application_complete", "is_application_failed", "failure_reason", "reasoning", "tool_call", "questions_answered"},
 	}
 }
 
