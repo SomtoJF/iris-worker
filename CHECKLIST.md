@@ -57,9 +57,9 @@
 - [ x ] In handle user action, descriptions to the user must not include tags. Must not be more than 3 line long and must be easy to understand.
 - [ x ] Add truthfulness clause to the planner prompt. The LLM must not lie and if the application requires that you provide information that will contradict user provided data, fail it.
 - [ x ] Viewing application data for each application in the frontend
-- [ ] Implement application cancelation
+- [ x ] Implement application cancelation
 - [ ] Implement email notifications on successful/failed applications, comments on feedback and user action required. (Mailjet)
-- [ ] Finish All Issues Feed
+- [ x ] Finish All Issues Feed
 - [ ] Figure out captcha solving
 - [ ] Re-evaluate submission detection logic. Maybe just have the LLM figure it out. --Wait until the page is stable (network request has been made) and immediately take the screenshot. LLM checks if the form inputs are partially filled (usually means failure) or success messages or if we're on a different page than the application page with the form (like the job description page) or if the new url contains success indicators
 - [ ] Indeed Integration
