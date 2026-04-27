@@ -20,6 +20,16 @@ type JobApplicationWorkflowInput struct {
 	IdUser                uint   `json:"id_user"`
 }
 
+const CancelSignalName = "CANCEL_APPLICATION"
+
+type CancelSignalPayload struct {
+	Reason string `json:"reason"`
+}
+
+func isCancelled(cancelCtx workflow.Context) bool {
+	return cancelCtx.Err() != nil
+}
+
 func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowInput) error {
 	logger := workflow.GetLogger(ctx)
 
@@ -36,44 +46,74 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	}
 	ctx = workflow.WithActivityOptions(ctx, activityOptions)
 
+	// Set up cancellation signal listener
+	cancelCtx, cancelFunc := workflow.WithCancel(ctx)
+	var cancelPayload CancelSignalPayload
+
+	workflow.Go(cancelCtx, func(gCtx workflow.Context) {
+		signalChan := workflow.GetSignalChannel(gCtx, CancelSignalName)
+		signalChan.Receive(gCtx, &cancelPayload)
+		cancelFunc()
+	})
+
 	workflowId := workflow.GetInfo(ctx).WorkflowExecution.ID
 
 	// jobDetails declared early so it's available to helpers even on pre-retrieval failures
 	var jobDetails JobDetails
 
-	sessionCtx, err := workflow.CreateSession(ctx, &workflow.SessionOptions{
+	sessionCtx, err := workflow.CreateSession(cancelCtx, &workflow.SessionOptions{
 		ExecutionTimeout: 24 * time.Hour,
 		CreationTimeout:  time.Minute,
 	})
 	if err != nil {
+		if isCancelled(cancelCtx) {
+			handleApplicationCancelled(ctx, input, jobDetails, cancelPayload.Reason)
+			return nil
+		}
 		logger.Error("Failed to create session", "error", err)
 		handleApplicationError(ctx, input, jobDetails, "An error occurred while starting your application session")
 		return err
 	}
 	defer workflow.CompleteSession(sessionCtx)
 
-	userResume, err := fetchUserResume(ctx, input.IdUser)
+	userResume, err := fetchUserResume(cancelCtx, input.IdUser)
 	if err != nil {
+		if isCancelled(cancelCtx) {
+			handleApplicationCancelled(ctx, input, jobDetails, cancelPayload.Reason)
+			return nil
+		}
 		logger.Error("Failed to fetch user resume", "error", err)
 		handleApplicationError(ctx, input, jobDetails, "An error occurred while fetching your resume")
 		return err
 	}
 
-	userProfile, err := fetchJobApplicationProfile(ctx, input.IdUser)
+	userProfile, err := fetchJobApplicationProfile(cancelCtx, input.IdUser)
 	if err != nil {
+		if isCancelled(cancelCtx) {
+			handleApplicationCancelled(ctx, input, jobDetails, cancelPayload.Reason)
+			return nil
+		}
 		logger.Error("Failed to fetch user profile", "error", err)
 		handleApplicationError(ctx, input, jobDetails, "An error occurred while fetching your profile")
 		return err
 	}
 
-	resumePath, err := loadResumeIntoMemory(ctx, userResume.FileName, userResume.FileKey)
+	resumePath, err := loadResumeIntoMemory(cancelCtx, userResume.FileName, userResume.FileKey)
 	if err != nil {
+		if isCancelled(cancelCtx) {
+			handleApplicationCancelled(ctx, input, jobDetails, cancelPayload.Reason)
+			return nil
+		}
 		logger.Error("Failed to download and load resume into memory", "error", err)
 		handleApplicationError(ctx, input, jobDetails, "An error occurred while loading your resume into memory")
 		return err
 	}
 
 	if err := openWebpage(sessionCtx, workflowId, input.Url); err != nil {
+		if isCancelled(cancelCtx) {
+			handleApplicationCancelled(ctx, input, jobDetails, cancelPayload.Reason)
+			return nil
+		}
 		logger.Error("Failed to open webpage", "error", err)
 		handleApplicationError(ctx, input, jobDetails, "We couldn't open the job posting page")
 		return err
@@ -81,6 +121,10 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 
 	jobDetails, err = retrieveJobDetails(sessionCtx, input.Url, input.IdUser, input.IdJobApplication)
 	if err != nil {
+		if isCancelled(cancelCtx) {
+			handleApplicationCancelled(ctx, input, jobDetails, cancelPayload.Reason)
+			return nil
+		}
 		logger.Error("Failed to retrieve job details", "error", err)
 		handleApplicationError(ctx, input, jobDetails, "We couldn't retrieve the job details")
 		return err
@@ -90,11 +134,15 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		return err
 	}
 
-	if err := updateJobApplication(ctx, input.IdJobApplication, map[string]interface{}{
+	if err := updateJobApplication(cancelCtx, input.IdJobApplication, map[string]interface{}{
 		"job_title":       jobDetails.JobTitle,
 		"company_name":    jobDetails.CompanyName,
 		"job_description": jobDetails.JobDescription,
 	}); err != nil {
+		if isCancelled(cancelCtx) {
+			handleApplicationCancelled(ctx, input, jobDetails, cancelPayload.Reason)
+			return nil
+		}
 		logger.Error("Failed to update job application", "error", err)
 		handleApplicationError(ctx, input, jobDetails, "We couldn't update the job application")
 		return err
@@ -133,6 +181,10 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 			FileName:   fmt.Sprintf("screenshot_%d.png", iteration),
 		}).Get(sessionCtx, &screenshot)
 		if err != nil {
+			if isCancelled(cancelCtx) {
+				handleApplicationCancelled(ctx, input, jobDetails, cancelPayload.Reason)
+				return nil
+			}
 			logger.Error("Failed to take screenshot", "error", err)
 			handleApplicationError(ctx, input, jobDetails, "We couldn't continue the application because we failed to capture the page state")
 			return err
@@ -155,8 +207,12 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 			RequiredFields:          requiredFields,
 		}
 
-		plannerResponse, err := planNextAction(ctx, plannerRequest)
+		plannerResponse, err := planNextAction(cancelCtx, plannerRequest)
 		if err != nil {
+			if isCancelled(cancelCtx) {
+				handleApplicationCancelled(ctx, input, jobDetails, cancelPayload.Reason)
+				return nil
+			}
 			logger.Error("Failed to plan next action", "error", err)
 			handleApplicationError(ctx, input, jobDetails, "We couldn't continue the application because we failed to plan the next step")
 			return err
@@ -186,6 +242,11 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		if plannerResponse.ToolCall != nil {
 			result := executeToolCall(sessionCtx, workflowId, input.IdUser, input.IdJobApplication, *plannerResponse.ToolCall)
 			toolCallHistory = append(toolCallHistory, result)
+
+			if result.Error != nil && isCancelled(cancelCtx) {
+				handleApplicationCancelled(ctx, input, jobDetails, cancelPayload.Reason)
+				return nil
+			}
 
 			if plannerResponse.ToolCall.Name == "write_cover_letter" {
 				if cl, ok := result.Result["cover_letter"].(string); ok {
@@ -246,6 +307,32 @@ func extractRequiredFields(taggedNodes []browserfactory.SerializableTaggedNode) 
 		required = append(required, copied)
 	}
 	return required
+}
+
+func handleApplicationCancelled(ctx workflow.Context, input JobApplicationWorkflowInput, jobDetails JobDetails, reason string) {
+	newCtx, _ := workflow.NewDisconnectedContext(ctx)
+	cleanupOpts := workflow.ActivityOptions{
+		StartToCloseTimeout: 30 * time.Second,
+		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
+	}
+	newCtx = workflow.WithActivityOptions(newCtx, cleanupOpts)
+
+	var reasonPtr *string
+	if reason != "" {
+		reasonPtr = &reason
+	}
+
+	updateJobApplication(newCtx, input.IdJobApplication, map[string]interface{}{
+		"status":              sqldb.JobApplicationStatusCancelled,
+		"cancellation_reason": reasonPtr,
+	})
+
+	workflow.ExecuteActivity(newCtx, "PublishRedisEvent", input.IdUser, string(realtimeevent.EventApplicationCancelled), map[string]interface{}{
+		"id":          input.ApplicationExternalId,
+		"jobTitle":    jobDetails.JobTitle,
+		"companyName": jobDetails.CompanyName,
+		"reason":      reason,
+	}).Get(newCtx, nil)
 }
 
 func handleApplicationError(ctx workflow.Context, input JobApplicationWorkflowInput, jobDetails JobDetails, failureReason string) {

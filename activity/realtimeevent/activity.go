@@ -17,6 +17,7 @@ const (
 	EventApplicationFailed     EventType = "APPLICATION_FAILED"
 	EventUserNotification      EventType = "USER_NOTIFICATION"
 	EventUserActionRequired    EventType = "USER_ACTION_REQUIRED"
+	EventApplicationCancelled  EventType = "APPLICATION_CANCELLED"
 )
 
 type Activities struct {

@@ -28,8 +28,9 @@ type JobApplicationStatus string
 const (
 	JobApplicationStatusPending JobApplicationStatus = "processing"
 	JobApplicationStatusApplied JobApplicationStatus = "applied"
-	JobApplicationStatusFailed  JobApplicationStatus = "failed"
-	JobApplicationStatusBlocked JobApplicationStatus = "blocked"
+	JobApplicationStatusFailed    JobApplicationStatus = "failed"
+	JobApplicationStatusBlocked   JobApplicationStatus = "blocked"
+	JobApplicationStatusCancelled JobApplicationStatus = "cancelled"
 )
 
 type JobApplication struct {
