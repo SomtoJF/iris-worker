@@ -60,7 +60,7 @@
 - [ x ] Implement application cancelation
 - [ x ] Finish All Issues Feed
 - [ ] Implement viewing application data in realtime
-- [ ] Users should be able to delete applications
+- [ x ] Users should be able to delete applications
 - [ ] Investigate LLM often skips writing coverletters
 - [ ] Investigate LLM often ignores optional fields
 - [ ] If an application to a company is currently running, users shouldn't be able to apply to that same company until the existing application is done.
