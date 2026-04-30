@@ -2,13 +2,12 @@ package jobapplication
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
-	"os"
 	"text/template"
 
+	browseractivity "github.com/SomtoJF/iris-worker/activity/browser"
 	s3activity "github.com/SomtoJF/iris-worker/activity/s3"
 	"github.com/SomtoJF/iris-worker/activity/sqldb"
 	"github.com/SomtoJF/iris-worker/aipi/types"
@@ -321,7 +320,7 @@ func planNextAction(ctx workflow.Context, input PlannerRequest) (PlannerResponse
 	}
 	userPrompt := userPromptBuf.String()
 
-	screenshotBase64, err := getBase64Screenshot(input.ScreenshotPath)
+	screenshotBase64, err := getBase64Screenshot(ctx, input.ScreenshotPath)
 	if err != nil {
 		return PlannerResponse{}, err
 	}
@@ -458,15 +457,14 @@ func getPlannerResponseSchema() map[string]interface{} {
 	}
 }
 
-func getBase64Screenshot(screenshotPath string) (string, error) {
-	screenshot, err := os.ReadFile(screenshotPath)
-	if err != nil {
+func getBase64Screenshot(ctx workflow.Context, screenshotPath string) (string, error) {
+	var screenshotBase64 string
+	if err := workflow.ExecuteActivity(ctx, "GetBase64Screenshot", browseractivity.GetBase64ScreenshotInput{
+		Path: screenshotPath,
+	}).Get(ctx, &screenshotBase64); err != nil {
 		return "", err
 	}
-
-	base64Screenshot := base64.StdEncoding.EncodeToString(screenshot)
-
-	return fmt.Sprintf("data:image/jpeg;base64,%s", base64Screenshot), nil
+	return screenshotBase64, nil
 }
 
 type JobDetails struct {
@@ -545,12 +543,11 @@ func getJobDetailsResponseSchema() map[string]interface{} {
 }
 
 func loadResumeIntoMemory(ctx workflow.Context, filename string, fileKey string) (string, error) {
-	destPath := fmt.Sprintf("%s/%s", os.TempDir(), filename)
-
 	var output s3activity.DownloadFileOutput
 	if err := workflow.ExecuteActivity(ctx, "DownloadFile", s3activity.DownloadFileInput{
 		Key:      fileKey,
-		DestPath: destPath,
+		DestPath: "",
+		Filename: filename,
 	}).Get(ctx, &output); err != nil {
 		return "", fmt.Errorf("failed to download resume from S3: %w", err)
 	}

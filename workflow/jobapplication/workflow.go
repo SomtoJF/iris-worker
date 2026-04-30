@@ -2,6 +2,7 @@ package jobapplication
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -24,6 +25,34 @@ const CancelSignalName = "CANCEL_APPLICATION"
 
 type CancelSignalPayload struct {
 	Reason string `json:"reason"`
+}
+
+type jobAppError struct {
+	PublicMessage string
+	LogMessage    string
+	Cause         error
+}
+
+func (e jobAppError) Error() string {
+	if e.Cause == nil {
+		return e.LogMessage
+	}
+	if e.LogMessage == "" {
+		return e.Cause.Error()
+	}
+	return fmt.Sprintf("%s: %v", e.LogMessage, e.Cause)
+}
+
+func (e jobAppError) Unwrap() error {
+	return e.Cause
+}
+
+func newJobAppError(err error, logMsg string, publicMsg string) error {
+	return jobAppError{
+		PublicMessage: publicMsg,
+		LogMessage:    logMsg,
+		Cause:         err,
+	}
 }
 
 func isCancelled(cancelCtx workflow.Context) bool {
@@ -91,6 +120,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	workflowId := workflow.GetInfo(ctx).WorkflowExecution.ID
 
 	var jobDetails JobDetails
+	var execResult executeJobApplicationResult
 
 	sessionCtx, err := workflow.CreateSession(cancelCtx, &workflow.SessionOptions{
 		ExecutionTimeout: SESSION_TIMEOUT,
@@ -106,43 +136,83 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	}
 	defer workflow.CompleteSession(sessionCtx)
 
-	userResume, err := fetchUserResume(cancelCtx, input.IdUser)
+	err = executeJobApplication(ctx, cancelCtx, sessionCtx, workflowId, input, &jobDetails, &execResult)
 	if err != nil {
 		if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
 			return cerr
 		}
-		logger.Error("Failed to fetch user resume", "error", err)
-		handleApplicationError(ctx, input, jobDetails, "An error occurred while fetching your resume")
+
+		publicMessage := "We couldn't complete your application. Please try again."
+		var jobErr jobAppError
+		if errors.As(err, &jobErr) {
+			if jobErr.PublicMessage != "" {
+				publicMessage = jobErr.PublicMessage
+			}
+			if jobErr.LogMessage != "" {
+				logger.Error(jobErr.LogMessage, "error", err)
+			} else {
+				logger.Error("Job application workflow failed", "error", err)
+			}
+		} else {
+			logger.Error("Job application workflow failed", "error", err)
+		}
+
+		handleApplicationError(ctx, input, jobDetails, publicMessage)
 		return err
 	}
 
+	handleApplicationSuccess(ctx, input, jobDetails)
+
+	questions := mapToQuestions(execResult.QAMap)
+	if len(questions) > 0 {
+		deduped, err := deduplicateQA(ctx, input.IdUser, input.IdJobApplication, questions)
+		if err != nil {
+			logger.Warn("Failed to deduplicate Q&A, saving raw", "error", err)
+		} else {
+			questions = deduped
+		}
+	}
+
+	if err := saveApplicationData(ctx, input.IdUser, input.IdJobApplication, execResult.IdResume, execResult.CoverLetter, questions); err != nil {
+		logger.Error("Failed to save application data", "error", err)
+	}
+
+	return nil
+}
+
+type executeJobApplicationResult struct {
+	IdResume    uint
+	CoverLetter *string
+	QAMap       map[string]string
+}
+
+func executeJobApplication(
+	ctx workflow.Context,
+	cancelCtx workflow.Context,
+	sessionCtx workflow.Context,
+	workflowID string,
+	input JobApplicationWorkflowInput,
+	jobDetails *JobDetails,
+	result *executeJobApplicationResult,
+) error {
+	userResume, err := fetchUserResume(cancelCtx, input.IdUser)
+	if err != nil {
+		return newJobAppError(err, "Failed to fetch user resume", "An error occurred while fetching your resume")
+	}
+	result.IdResume = userResume.IdResume
+
 	userProfile, err := fetchJobApplicationProfile(cancelCtx, input.IdUser)
 	if err != nil {
-		if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
-			return cerr
-		}
-		logger.Error("Failed to fetch user profile", "error", err)
-		handleApplicationError(ctx, input, jobDetails, "An error occurred while fetching your profile")
-		return err
+		return newJobAppError(err, "Failed to fetch user profile", "An error occurred while fetching your profile")
 	}
 
 	resumePath, err := loadResumeIntoMemory(cancelCtx, userResume.FileName, userResume.FileKey)
 	if err != nil {
-		if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
-			return cerr
-		}
-		logger.Error("Failed to download and load resume into memory", "error", err)
-		handleApplicationError(ctx, input, jobDetails, "An error occurred while loading your resume into memory")
-		return err
+		return newJobAppError(err, "Failed to download and load resume into memory", "An error occurred while loading your resume into memory")
 	}
 
-	if err := openWebpage(sessionCtx, workflowId, input.Url); err != nil {
-		if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
-			return cerr
-		}
-		logger.Error("Failed to open webpage", "error", err)
-		handleApplicationError(ctx, input, jobDetails, "We couldn't open the job posting page")
-		return err
+	if err := openWebpage(sessionCtx, workflowID, input.Url); err != nil {
+		return newJobAppError(err, "Failed to open webpage", "We couldn't open the job posting page")
 	}
 
 	// Ensure browser resources are released even if the session is canceled/times out.
@@ -155,22 +225,22 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		}
 		newCtx = workflow.WithActivityOptions(newCtx, closeOpts)
 		workflow.ExecuteActivity(newCtx, "ClosePage", browser.ClosePageInput{
-			WorkflowID: workflowId,
-		})
+			WorkflowID: workflowID,
+		}).Get(newCtx, nil)
 	}()
 
-	jobDetails, err = retrieveJobDetails(sessionCtx, input.Url, input.IdUser, input.IdJobApplication)
+	retrieved, err := retrieveJobDetails(sessionCtx, input.Url, input.IdUser, input.IdJobApplication)
 	if err != nil {
-		if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
-			return cerr
-		}
-		logger.Error("Failed to retrieve job details", "error", err)
-		handleApplicationError(ctx, input, jobDetails, "We couldn't retrieve the job details")
-		return err
-	} else if !jobDetails.IsValidJobPosting {
-		logger.Info("Invalid job posting", "error", "The job posting is invalid")
-		handleApplicationError(ctx, input, jobDetails, "The job posting is invalid. The link doesn't contain the job description")
-		return err
+		return newJobAppError(err, "Failed to retrieve job details", "We couldn't retrieve the job details")
+	}
+	*jobDetails = retrieved
+
+	if !jobDetails.IsValidJobPosting {
+		return newJobAppError(
+			temporal.NewNonRetryableApplicationError("invalid job posting", "InvalidJobPosting", nil),
+			"Invalid job posting",
+			"The job posting is invalid. The link doesn't contain the job description",
+		)
 	}
 
 	if err := updateJobApplication(cancelCtx, input.IdJobApplication, map[string]interface{}{
@@ -178,45 +248,28 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		"company_name":    jobDetails.CompanyName,
 		"job_description": jobDetails.JobDescription,
 	}); err != nil {
-		if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
-			return cerr
-		}
-		logger.Error("Failed to update job application", "error", err)
-		handleApplicationError(ctx, input, jobDetails, "We couldn't update the job application")
-		return err
-	}
-
-	if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
-		return cerr
+		return newJobAppError(err, "Failed to update job application", "We couldn't update the job application")
 	}
 
 	userProfileBytes, err := json.Marshal(userProfile)
 	if err != nil {
-		logger.Error("Failed to marshal user profile", "error", err)
-		handleApplicationError(ctx, input, jobDetails, "We couldn't marshal the user profile")
-		return err
+		return newJobAppError(err, "Failed to marshal user profile", "We couldn't marshal the user profile")
 	}
 	userProfileJSON := string(userProfileBytes)
 
 	isApplicationComplete := false
 	toolCallHistory := []ToolCallResult{}
 	qaMap := make(map[string]string)
-	var coverLetter *string
 	const maxAgentIterations = 50
 
 	for iteration := 0; !isApplicationComplete && iteration < maxAgentIterations; iteration++ {
 		var screenshot browser.TakeScreenshotOutput
 		err = workflow.ExecuteActivity(sessionCtx, "TakeScreenshot", browser.TakeScreenshotInput{
-			WorkflowID: workflowId,
+			WorkflowID: workflowID,
 			FileName:   fmt.Sprintf("screenshot_%d.png", iteration),
 		}).Get(sessionCtx, &screenshot)
 		if err != nil {
-			if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
-				return cerr
-			}
-			logger.Error("Failed to take screenshot", "error", err)
-			handleApplicationError(ctx, input, jobDetails, "We couldn't continue the application because we failed to capture the page state")
-			return err
+			return newJobAppError(err, "Failed to take screenshot", "We couldn't continue the application because we failed to capture the page state")
 		}
 
 		requiredFields := extractRequiredFields(screenshot.TaggedNodes)
@@ -238,12 +291,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 
 		plannerResponse, err := planNextAction(cancelCtx, plannerRequest)
 		if err != nil {
-			if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
-				return cerr
-			}
-			logger.Error("Failed to plan next action", "error", err)
-			handleApplicationError(ctx, input, jobDetails, "We couldn't continue the application because we failed to plan the next step")
-			return err
+			return newJobAppError(err, "Failed to plan next action", "We couldn't continue the application because we failed to plan the next step")
 		}
 
 		if plannerResponse.IsApplicationFailed {
@@ -251,9 +299,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 			if plannerResponse.FailureReason != nil && *plannerResponse.FailureReason != "" {
 				failureReason = *plannerResponse.FailureReason
 			}
-			handleApplicationError(ctx, input, jobDetails, failureReason)
-			logger.Warn("Job application failed by planner", "reason", failureReason)
-			return fmt.Errorf("%s", failureReason)
+			return newJobAppError(fmt.Errorf("%s", failureReason), "Job application failed by planner", failureReason)
 		}
 
 		for _, qa := range plannerResponse.QuestionsAnswered {
@@ -268,18 +314,16 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		}
 
 		if plannerResponse.ToolCall != nil {
-			result := executeToolCall(sessionCtx, workflowId, input.IdUser, input.IdJobApplication, *plannerResponse.ToolCall)
-			toolCallHistory = append(toolCallHistory, result)
+			toolResult := executeToolCall(sessionCtx, workflowID, input.IdUser, input.IdJobApplication, *plannerResponse.ToolCall)
+			toolCallHistory = append(toolCallHistory, toolResult)
 
-			if result.Error != nil && isCancelled(cancelCtx) {
-				if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
-					return cerr
-				}
+			if toolResult.Error != nil && isCancelled(cancelCtx) {
+				return toolResult.Error
 			}
 
 			if plannerResponse.ToolCall.Name == "write_cover_letter" {
-				if cl, ok := result.Result["cover_letter"].(string); ok {
-					coverLetter = &cl
+				if cl, ok := toolResult.Result["cover_letter"].(string); ok {
+					result.CoverLetter = &cl
 				}
 			}
 		}
@@ -287,26 +331,10 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 
 	if !isApplicationComplete {
 		failureReason := "We couldn't complete your application. Please try again."
-		handleApplicationError(ctx, input, jobDetails, failureReason)
-		logger.Warn("Job application incomplete", "reason", "max_iterations", "maxAgentIterations", maxAgentIterations)
-		return fmt.Errorf("%s", failureReason)
+		return newJobAppError(fmt.Errorf("%s", failureReason), "Job application incomplete", failureReason)
 	}
 
-	handleApplicationSuccess(ctx, input, jobDetails)
-
-	questions := mapToQuestions(qaMap)
-	if len(questions) > 0 {
-		deduped, err := deduplicateQA(ctx, input.IdUser, input.IdJobApplication, questions)
-		if err != nil {
-			logger.Warn("Failed to deduplicate Q&A, saving raw", "error", err)
-		} else {
-			questions = deduped
-		}
-	}
-
-	if err := saveApplicationData(ctx, input.IdUser, input.IdJobApplication, userResume.IdResume, coverLetter, questions); err != nil {
-		logger.Error("Failed to save application data", "error", err)
-	}
+	result.QAMap = qaMap
 
 	return nil
 }
@@ -365,17 +393,24 @@ func handleApplicationCancelled(ctx workflow.Context, input JobApplicationWorkfl
 }
 
 func handleApplicationError(ctx workflow.Context, input JobApplicationWorkflowInput, jobDetails JobDetails, failureReason string) {
+	newCtx, _ := workflow.NewDisconnectedContext(ctx)
+	cleanupOpts := workflow.ActivityOptions{
+		StartToCloseTimeout: 30 * time.Second,
+		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
+	}
+	newCtx = workflow.WithActivityOptions(newCtx, cleanupOpts)
+
 	var failureReasonPtf *string
 	if failureReason != "" {
 		failureReasonPtf = &failureReason
 	}
-	updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusFailed, failureReasonPtf)
+	updateJobApplicationStatus(newCtx, input.IdJobApplication, sqldb.JobApplicationStatusFailed, failureReasonPtf)
 
-	workflow.ExecuteActivity(ctx, "PublishRedisEvent", input.IdUser, string(realtimeevent.EventApplicationFailed), map[string]interface{}{
+	workflow.ExecuteActivity(newCtx, "PublishRedisEvent", input.IdUser, string(realtimeevent.EventApplicationFailed), map[string]interface{}{
 		"id":          input.ApplicationExternalId,
 		"jobTitle":    jobDetails.JobTitle,
 		"companyName": jobDetails.CompanyName,
-	}).Get(ctx, nil)
+	}).Get(newCtx, nil)
 }
 
 func handleApplicationSuccess(ctx workflow.Context, input JobApplicationWorkflowInput, jobDetails JobDetails) {
@@ -473,7 +508,14 @@ func fetchJobApplicationProfile(ctx workflow.Context, idUser uint) (UserProfile,
 	if err := workflow.ExecuteActivity(ctx, "FetchJobApplicationProfile", idUser).Get(ctx, &jobApplicationProfile); err != nil {
 		return UserProfile{}, err
 	}
-	age := time.Now().Year() - jobApplicationProfile.DateOfBirth.Year()
+
+	now := workflow.Now(ctx)
+	age := now.Year() - jobApplicationProfile.DateOfBirth.Year()
+	if now.Month() < jobApplicationProfile.DateOfBirth.Month() ||
+		(now.Month() == jobApplicationProfile.DateOfBirth.Month() && now.Day() < jobApplicationProfile.DateOfBirth.Day()) {
+		age--
+	}
+
 	return UserProfile{
 		FirstName:                   jobApplicationProfile.FirstName,
 		LastName:                    jobApplicationProfile.LastName,

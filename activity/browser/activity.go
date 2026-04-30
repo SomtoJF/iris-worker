@@ -2,9 +2,11 @@ package browser
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -74,6 +76,16 @@ func (a *Activity) TakeScreenshot(ctx context.Context, input TakeScreenshotInput
 		TaggedNodes:          serializableNodes,
 		TaggedFileInputNodes: serializableFileInputNodes,
 	}, nil
+}
+
+func (a *Activity) GetBase64Screenshot(ctx context.Context, input GetBase64ScreenshotInput) (string, error) {
+	screenshot, err := os.ReadFile(input.Path)
+	if err != nil {
+		return "", err
+	}
+
+	base64Screenshot := base64.StdEncoding.EncodeToString(screenshot)
+	return fmt.Sprintf("data:image/jpeg;base64,%s", base64Screenshot), nil
 }
 
 func (a *Activity) Click(ctx context.Context, input ClickInput) error {

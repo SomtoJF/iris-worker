@@ -18,6 +18,10 @@ type TakeScreenshotOutput struct {
 	TaggedFileInputNodes []browserfactory.SerializableTaggedFileInputNode `json:"tagged_file_input_nodes"`
 }
 
+type GetBase64ScreenshotInput struct {
+	Path string `json:"path"`
+}
+
 type ClickInput struct {
 	WorkflowID   string `json:"workflow_id"`
 	ElementIndex int    `json:"element_index"`
