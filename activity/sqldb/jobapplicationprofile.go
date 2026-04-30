@@ -41,6 +41,7 @@ type JobApplicationProfile struct {
 	Ethnicity                   string                `json:"ethnicity"`
 	IsOpenToRelocating          *bool                 `json:"is_open_to_relocating" gorm:"default:NULL"`
 	NoticePeriodDays            *int                  `json:"notice_period_days" gorm:"default:NULL"`
+	LinkedInUrl                 *string               `json:"linkedin_url"`
 	PreferredWorkingArrangement pq.StringArray        `json:"preferred_working_arrangement" gorm:"type:text[]"`
 	LanguageProficiencies       LanguageProficiencies `json:"language_proficiencies" gorm:"type:jsonb"`
 	PortfolioLink               *string               `json:"portfolio_link"`

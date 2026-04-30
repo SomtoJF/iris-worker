@@ -58,8 +58,13 @@
 - [ x ] Add truthfulness clause to the planner prompt. The LLM must not lie and if the application requires that you provide information that will contradict user provided data, fail it.
 - [ x ] Viewing application data for each application in the frontend
 - [ x ] Implement application cancelation
-- [ ] Implement email notifications on successful/failed applications, comments on feedback and user action required. (Mailjet)
 - [ x ] Finish All Issues Feed
+- [ ] Implement viewing application data in realtime
+- [ ] Users should be able to delete applications
+- [ ] Investigate LLM often skips writing coverletters
+- [ ] Investigate LLM often ignores optional fields
+- [ ] If an application to a company is currently running, users shouldn't be able to apply to that same company until the existing application is done.
+- [ ] Implement email notifications on successful/failed applications, comments on feedback and user action required. (Mailjet)
 - [ ] Figure out captcha solving
 - [ ] Re-evaluate submission detection logic. Maybe just have the LLM figure it out. --Wait until the page is stable (network request has been made) and immediately take the screenshot. LLM checks if the form inputs are partially filled (usually means failure) or success messages or if we're on a different page than the application page with the form (like the job description page) or if the new url contains success indicators
 - [ ] Indeed Integration

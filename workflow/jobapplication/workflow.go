@@ -30,6 +30,29 @@ func isCancelled(cancelCtx workflow.Context) bool {
 	return cancelCtx.Err() != nil
 }
 
+func handleCancelOrTimeout(
+	ctx workflow.Context,
+	cancelCtx workflow.Context,
+	timedOut bool,
+	input JobApplicationWorkflowInput,
+	jobDetails JobDetails,
+	cancelPayload CancelSignalPayload,
+) (handled bool, err error) {
+	if !isCancelled(cancelCtx) {
+		return false, nil
+	}
+
+	if timedOut {
+		handleApplicationError(ctx, input, jobDetails, "Application timed out. Please try again.")
+		return true, temporal.NewNonRetryableApplicationError("workflow soft timeout", "WorkflowSoftTimeout", nil)
+	}
+
+	handleApplicationCancelled(ctx, input, jobDetails, cancelPayload.Reason)
+	return true, nil
+}
+
+const SESSION_TIMEOUT = 23*time.Hour + 50*time.Minute
+
 func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowInput) error {
 	logger := workflow.GetLogger(ctx)
 
@@ -49,6 +72,15 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	// Set up cancellation signal listener
 	cancelCtx, cancelFunc := workflow.WithCancel(ctx)
 	var cancelPayload CancelSignalPayload
+	timedOut := false
+
+	workflow.Go(ctx, func(gCtx workflow.Context) {
+		if err := workflow.NewTimer(gCtx, SESSION_TIMEOUT).Get(gCtx, nil); err != nil {
+			return
+		}
+		timedOut = true
+		cancelFunc()
+	})
 
 	workflow.Go(cancelCtx, func(gCtx workflow.Context) {
 		signalChan := workflow.GetSignalChannel(gCtx, CancelSignalName)
@@ -58,17 +90,15 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 
 	workflowId := workflow.GetInfo(ctx).WorkflowExecution.ID
 
-	// jobDetails declared early so it's available to helpers even on pre-retrieval failures
 	var jobDetails JobDetails
 
 	sessionCtx, err := workflow.CreateSession(cancelCtx, &workflow.SessionOptions{
-		ExecutionTimeout: 24 * time.Hour,
+		ExecutionTimeout: SESSION_TIMEOUT,
 		CreationTimeout:  time.Minute,
 	})
 	if err != nil {
-		if isCancelled(cancelCtx) {
-			handleApplicationCancelled(ctx, input, jobDetails, cancelPayload.Reason)
-			return nil
+		if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
+			return cerr
 		}
 		logger.Error("Failed to create session", "error", err)
 		handleApplicationError(ctx, input, jobDetails, "An error occurred while starting your application session")
@@ -78,9 +108,8 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 
 	userResume, err := fetchUserResume(cancelCtx, input.IdUser)
 	if err != nil {
-		if isCancelled(cancelCtx) {
-			handleApplicationCancelled(ctx, input, jobDetails, cancelPayload.Reason)
-			return nil
+		if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
+			return cerr
 		}
 		logger.Error("Failed to fetch user resume", "error", err)
 		handleApplicationError(ctx, input, jobDetails, "An error occurred while fetching your resume")
@@ -89,9 +118,8 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 
 	userProfile, err := fetchJobApplicationProfile(cancelCtx, input.IdUser)
 	if err != nil {
-		if isCancelled(cancelCtx) {
-			handleApplicationCancelled(ctx, input, jobDetails, cancelPayload.Reason)
-			return nil
+		if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
+			return cerr
 		}
 		logger.Error("Failed to fetch user profile", "error", err)
 		handleApplicationError(ctx, input, jobDetails, "An error occurred while fetching your profile")
@@ -100,9 +128,8 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 
 	resumePath, err := loadResumeIntoMemory(cancelCtx, userResume.FileName, userResume.FileKey)
 	if err != nil {
-		if isCancelled(cancelCtx) {
-			handleApplicationCancelled(ctx, input, jobDetails, cancelPayload.Reason)
-			return nil
+		if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
+			return cerr
 		}
 		logger.Error("Failed to download and load resume into memory", "error", err)
 		handleApplicationError(ctx, input, jobDetails, "An error occurred while loading your resume into memory")
@@ -110,20 +137,32 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	}
 
 	if err := openWebpage(sessionCtx, workflowId, input.Url); err != nil {
-		if isCancelled(cancelCtx) {
-			handleApplicationCancelled(ctx, input, jobDetails, cancelPayload.Reason)
-			return nil
+		if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
+			return cerr
 		}
 		logger.Error("Failed to open webpage", "error", err)
 		handleApplicationError(ctx, input, jobDetails, "We couldn't open the job posting page")
 		return err
 	}
 
+	// Ensure browser resources are released even if the session is canceled/times out.
+	// Use a disconnected context derived from the base workflow context, not the session context.
+	defer func() {
+		newCtx, _ := workflow.NewDisconnectedContext(ctx)
+		closeOpts := workflow.ActivityOptions{
+			StartToCloseTimeout: 30 * time.Second,
+			RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
+		}
+		newCtx = workflow.WithActivityOptions(newCtx, closeOpts)
+		workflow.ExecuteActivity(newCtx, "ClosePage", browser.ClosePageInput{
+			WorkflowID: workflowId,
+		})
+	}()
+
 	jobDetails, err = retrieveJobDetails(sessionCtx, input.Url, input.IdUser, input.IdJobApplication)
 	if err != nil {
-		if isCancelled(cancelCtx) {
-			handleApplicationCancelled(ctx, input, jobDetails, cancelPayload.Reason)
-			return nil
+		if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
+			return cerr
 		}
 		logger.Error("Failed to retrieve job details", "error", err)
 		handleApplicationError(ctx, input, jobDetails, "We couldn't retrieve the job details")
@@ -139,26 +178,17 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		"company_name":    jobDetails.CompanyName,
 		"job_description": jobDetails.JobDescription,
 	}); err != nil {
-		if isCancelled(cancelCtx) {
-			handleApplicationCancelled(ctx, input, jobDetails, cancelPayload.Reason)
-			return nil
+		if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
+			return cerr
 		}
 		logger.Error("Failed to update job application", "error", err)
 		handleApplicationError(ctx, input, jobDetails, "We couldn't update the job application")
 		return err
 	}
 
-	defer func() {
-		newCtx, _ := workflow.NewDisconnectedContext(sessionCtx)
-		closeOpts := workflow.ActivityOptions{
-			StartToCloseTimeout: 30 * time.Second,
-			RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
-		}
-		newCtx = workflow.WithActivityOptions(newCtx, closeOpts)
-		workflow.ExecuteActivity(newCtx, "ClosePage", browser.ClosePageInput{
-			WorkflowID: workflowId,
-		})
-	}()
+	if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
+		return cerr
+	}
 
 	userProfileBytes, err := json.Marshal(userProfile)
 	if err != nil {
@@ -181,9 +211,8 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 			FileName:   fmt.Sprintf("screenshot_%d.png", iteration),
 		}).Get(sessionCtx, &screenshot)
 		if err != nil {
-			if isCancelled(cancelCtx) {
-				handleApplicationCancelled(ctx, input, jobDetails, cancelPayload.Reason)
-				return nil
+			if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
+				return cerr
 			}
 			logger.Error("Failed to take screenshot", "error", err)
 			handleApplicationError(ctx, input, jobDetails, "We couldn't continue the application because we failed to capture the page state")
@@ -209,9 +238,8 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 
 		plannerResponse, err := planNextAction(cancelCtx, plannerRequest)
 		if err != nil {
-			if isCancelled(cancelCtx) {
-				handleApplicationCancelled(ctx, input, jobDetails, cancelPayload.Reason)
-				return nil
+			if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
+				return cerr
 			}
 			logger.Error("Failed to plan next action", "error", err)
 			handleApplicationError(ctx, input, jobDetails, "We couldn't continue the application because we failed to plan the next step")
@@ -244,8 +272,9 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 			toolCallHistory = append(toolCallHistory, result)
 
 			if result.Error != nil && isCancelled(cancelCtx) {
-				handleApplicationCancelled(ctx, input, jobDetails, cancelPayload.Reason)
-				return nil
+				if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
+					return cerr
+				}
 			}
 
 			if plannerResponse.ToolCall.Name == "write_cover_letter" {
@@ -433,6 +462,7 @@ type UserProfile struct {
 	Ethnicity                   string                      `json:"ethnicity,omitempty"`
 	IsOpenToRelocating          *bool                       `json:"is_open_to_relocating,omitempty"`
 	NoticePeriodDays            *int                        `json:"notice_period_days,omitempty"`
+	LinkedInUrl                 *string                     `json:"linkedin_url,omitempty"`
 	PreferredWorkingArrangement []string                    `json:"preferred_working_arrangement,omitempty"`
 	LanguageProficiencies       []sqldb.LanguageProficiency `json:"language_proficiencies,omitempty"`
 	PortfolioLink               *string                     `json:"portfolio_link,omitempty"`
@@ -465,6 +495,7 @@ func fetchJobApplicationProfile(ctx workflow.Context, idUser uint) (UserProfile,
 		Ethnicity:                   jobApplicationProfile.Ethnicity,
 		IsOpenToRelocating:          jobApplicationProfile.IsOpenToRelocating,
 		NoticePeriodDays:            jobApplicationProfile.NoticePeriodDays,
+		LinkedInUrl:                 jobApplicationProfile.LinkedInUrl,
 		PreferredWorkingArrangement: jobApplicationProfile.PreferredWorkingArrangement,
 		LanguageProficiencies:       jobApplicationProfile.LanguageProficiencies,
 		PortfolioLink:               jobApplicationProfile.PortfolioLink,
