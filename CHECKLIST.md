@@ -61,11 +61,19 @@
 - [ x ] Finish All Issues Feed
 - [ ] Implement viewing application data in realtime
 - [ x ] Users should be able to delete applications
-- [ ] Investigate LLM often skips writing coverletters
-- [ ] Investigate LLM often ignores optional fields
-- [ ] If an application to a company is currently running, users shouldn't be able to apply to that same company until the existing application is done.
+- [ x ] Investigate LLM often skips writing coverletters
+- [ x ] Investigate LLM often ignores optional fields
+- [ ] Improve cover letter writing
+- [ ] Fix question-answer deduplication
 - [ ] Implement email notifications on successful/failed applications, comments on feedback and user action required. (Mailjet)
 - [ ] Figure out captcha solving
 - [ ] Re-evaluate submission detection logic. Maybe just have the LLM figure it out. --Wait until the page is stable (network request has been made) and immediately take the screenshot. LLM checks if the form inputs are partially filled (usually means failure) or success messages or if we're on a different page than the application page with the form (like the job description page) or if the new url contains success indicators
 - [ ] Indeed Integration
-- [ ] Make sure Job Search and apply works well for Greenhouse (job-boards.greenhouse.io), Lever (jobs.lever.co), Wellfound (wellfound.com), Workable (apply.workable.com), Ashby (jobs.ashbyhq.com), Remotefront (remotefront.com)
+- [ ] Make sure Job Search and apply works well for the following job boards:
+  - [ x ] Greenhouse (job-boards.greenhouse.io)
+  - [ ] Lever (jobs.lever.co)
+  - [ ] Wellfound (wellfound.com)
+  - [ ] Workable (apply.workable.com)
+  - [ ] Ashby (jobs.ashbyhq.com)
+  - [ ] Remotefront (remotefront.com)
+- [ ] If an application to a company is currently running, users shouldn't be able to apply to that same company until the existing application is done.
