@@ -26,19 +26,19 @@ type TemplateSet struct {
 var Templates TemplateSet
 
 type CoverLetterWorkflowInput struct {
-	IdJobApplication uint   `json:"id_job_application"`
-	IdUser           uint   `json:"id_user"`
-	WorkflowID       string `json:"workflow_id"`
-	ElementIndex     int    `json:"element_index"`
+	IdJobApplication uint    `json:"id_job_application"`
+	IdUser           uint    `json:"id_user"`
+	WorkflowID       *string `json:"workflow_id,omitempty"`
+	ElementIndex     *int    `json:"element_index,omitempty"`
 }
 
 type coverLetterPromptData struct {
-	IdJobApplication uint                    `json:"id_job_application"`
-	IdUser           uint                    `json:"id_user"`
-	CompanyName      string                  `json:"company_name"`
-	JobTitle         string                  `json:"job_title"`
-	JobDescription   string                  `json:"job_description"`
-	CandidateResume  string                  `json:"candidate_resume"`
+	IdJobApplication uint                     `json:"id_job_application"`
+	IdUser           uint                     `json:"id_user"`
+	CompanyName      string                   `json:"company_name"`
+	JobTitle         string                   `json:"job_title"`
+	JobDescription   string                   `json:"job_description"`
+	CandidateResume  string                   `json:"candidate_resume"`
 	CompanyPages     []sqldb.WebsiteCachePage `json:"company_pages"`
 }
 
@@ -121,12 +121,14 @@ func CoverLetterWorkflow(ctx workflow.Context, input CoverLetterWorkflowInput) (
 		return nil, err
 	}
 
-	if err := workflow.ExecuteActivity(ctx, "Type", browser.TypeInput{
-		WorkflowID:   input.WorkflowID,
-		ElementIndex: input.ElementIndex,
-		Text:         out.CoverLetter,
-	}).Get(ctx, nil); err != nil {
-		return nil, fmt.Errorf("type cover letter: %w", err)
+	if input.WorkflowID != nil || input.ElementIndex != nil {
+		if err := workflow.ExecuteActivity(ctx, "Type", browser.TypeInput{
+			WorkflowID:   *input.WorkflowID,
+			ElementIndex: *input.ElementIndex,
+			Text:         out.CoverLetter,
+		}).Get(ctx, nil); err != nil {
+			return nil, fmt.Errorf("type cover letter: %w", err)
+		}
 	}
 
 	wordCount := len(strings.Fields(out.CoverLetter))

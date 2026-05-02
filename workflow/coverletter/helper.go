@@ -47,7 +47,8 @@ type indexedScrapeResult struct {
 
 // ── constants ──
 
-const maxScrapedContentLen = 3000
+const MAX_SCRAPED_CONTENT_LEN = 3000
+const MAX_PAGES_TO_SCRAPE = 4
 
 var blockedPathSegments = []string{
 	"investor", "career", "partner", "product", "feature",
@@ -76,6 +77,9 @@ func gatherCompanyInfo(ctx workflow.Context, companyName, jobDescription string,
 	filtered := programmaticFilterResults(validResults, domain)
 	if len(filtered) == 0 {
 		return nil
+	}
+	if len(filtered) > MAX_PAGES_TO_SCRAPE {
+		filtered = filtered[:MAX_PAGES_TO_SCRAPE]
 	}
 
 	// check cache
@@ -243,8 +247,8 @@ func concurrentScrapePages(ctx workflow.Context, results []web.SerperOrganicResu
 				logger.Warn("ScrapeWebPage failed", "url", r.Link, "error", err)
 			} else {
 				content := strings.TrimSpace(out.Data)
-				if len(content) > maxScrapedContentLen {
-					content = content[:maxScrapedContentLen]
+				if len(content) > MAX_SCRAPED_CONTENT_LEN {
+					content = content[:MAX_SCRAPED_CONTENT_LEN]
 				}
 				page.Content = content
 			}
