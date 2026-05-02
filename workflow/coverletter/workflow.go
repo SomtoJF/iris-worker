@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/SomtoJF/iris-worker/activity/browser"
-	"github.com/SomtoJF/iris-worker/activity/sqldb"
+	sqldb "github.com/SomtoJF/iris-worker/activity/sqldb"
 	"github.com/SomtoJF/iris-worker/aipi/types"
 	"github.com/SomtoJF/iris-worker/helper"
 	"go.temporal.io/sdk/temporal"
@@ -17,8 +17,10 @@ import (
 )
 
 type TemplateSet struct {
-	System *template.Template
-	User   *template.Template
+	System          *template.Template
+	User            *template.Template
+	LLMFilterSystem *template.Template
+	LLMFilterUser   *template.Template
 }
 
 var Templates TemplateSet
@@ -31,12 +33,13 @@ type CoverLetterWorkflowInput struct {
 }
 
 type coverLetterPromptData struct {
-	IdJobApplication uint   `json:"id_job_application"`
-	IdUser           uint   `json:"id_user"`
-	CompanyName      string `json:"company_name"`
-	JobTitle         string `json:"job_title"`
-	JobDescription   string `json:"job_description"`
-	CandidateResume  string `json:"candidate_resume"`
+	IdJobApplication uint                    `json:"id_job_application"`
+	IdUser           uint                    `json:"id_user"`
+	CompanyName      string                  `json:"company_name"`
+	JobTitle         string                  `json:"job_title"`
+	JobDescription   string                  `json:"job_description"`
+	CandidateResume  string                  `json:"candidate_resume"`
+	CompanyPages     []sqldb.WebsiteCachePage `json:"company_pages"`
 }
 
 type coverLetterLLMResponse struct {
@@ -50,6 +53,14 @@ func SetTemplates() {
 		panic(err)
 	}
 	Templates.User, err = helper.LoadTemplate("workflow/coverletter/prompt/user.go.tmpl")
+	if err != nil {
+		panic(err)
+	}
+	Templates.LLMFilterSystem, err = helper.LoadTemplate("workflow/jobapplication/prompt/llmfilter/system.go.tmpl")
+	if err != nil {
+		panic(err)
+	}
+	Templates.LLMFilterUser, err = helper.LoadTemplate("workflow/jobapplication/prompt/llmfilter/user.go.tmpl")
 	if err != nil {
 		panic(err)
 	}
@@ -81,8 +92,10 @@ func CoverLetterWorkflow(ctx workflow.Context, input CoverLetterWorkflowInput) (
 		return nil, fmt.Errorf("get job application: %w", err)
 	}
 
-	// websearch about {company name} company
-	// LLM filter. Look for homepage, about us, mission/vision statement, values, etc.
+	companyPages := gatherCompanyInfo(ctx,
+		strings.TrimSpace(jobApplication.CompanyName),
+		strings.TrimSpace(jobApplication.JobDescription),
+		input.IdUser, input.IdJobApplication)
 
 	promptData := coverLetterPromptData{
 		IdUser:           input.IdUser,
@@ -91,6 +104,7 @@ func CoverLetterWorkflow(ctx workflow.Context, input CoverLetterWorkflowInput) (
 		JobTitle:         strings.TrimSpace(jobApplication.JobTitle),
 		JobDescription:   strings.TrimSpace(jobApplication.JobDescription),
 		CandidateResume:  strings.TrimSpace(resume.Content),
+		CompanyPages:     companyPages,
 	}
 
 	systemPrompt, err := executeTemplateToString(Templates.System, promptData)

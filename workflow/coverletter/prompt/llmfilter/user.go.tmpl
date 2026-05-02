@@ -1,0 +1,18 @@
+<user>
+  <company_name>{{.CompanyName}}</company_name>
+
+  <job_description>
+{{.JobDescription}}
+  </job_description>
+
+  <search_results>
+  {{range .Results}}
+    <result>
+      <index>{{.Index}}</index>
+      <title>{{.Title}}</title>
+      <link>{{.Link}}</link>
+      <snippet>{{.Snippet}}</snippet>
+    </result>
+  {{end}}
+  </search_results>
+</user>

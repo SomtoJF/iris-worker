@@ -22,4 +22,17 @@
 {{.CandidateResume}}
     </resume>
   </candidate>
+{{if .CompanyPages}}
+  <company_research>
+  {{range .CompanyPages}}
+    <page>
+      <title>{{.Title}}</title>
+      <url>{{.Url}}</url>
+      <content>
+{{.Content}}
+      </content>
+    </page>
+  {{end}}
+  </company_research>
+{{end}}
 </user>
