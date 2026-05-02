@@ -31,7 +31,7 @@ type ScrapeWebPageInput struct {
 	Url              string `json:"url"`
 	IdUser           uint   `json:"id_user"`
 	IdJobApplication *uint  `json:"id_job_application,omitempty"`
-	Advanced         string `json:"advanced"`
+	Advanced         bool   `json:"advanced"`
 }
 
 type ScrapeWebPageOutput struct {
@@ -56,7 +56,7 @@ func (a *Activity) ScrapeWebPage(ctx context.Context, input ScrapeWebPageInput) 
 	go func() {
 		var result ScrapeWebPageOutput
 		var err error
-		if input.Advanced == "true" {
+		if input.Advanced {
 			result, err = scrapeWithSerper(input.Url)
 		} else {
 			result, err = scrapeWithColly(input.Url, parsedURL.Host)
@@ -70,7 +70,7 @@ func (a *Activity) ScrapeWebPage(ctx context.Context, input ScrapeWebPageInput) 
 
 	select {
 	case result := <-resultChan:
-		if input.Advanced == "true" {
+		if input.Advanced {
 			a.saveScrapesCostTracking(input)
 		}
 		return result, nil

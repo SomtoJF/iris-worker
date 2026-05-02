@@ -479,7 +479,7 @@ func retrieveJobDetails(ctx workflow.Context, url string, idUser uint, idJobAppl
 	var scrapeOutput map[string]interface{}
 	if err := workflow.ExecuteActivity(ctx, "ScrapeWebPage", map[string]interface{}{
 		"url":                url,
-		"advanced":           "true",
+		"advanced":           true,
 		"id_user":            idUser,
 		"id_job_application": idJobApplication,
 	}).Get(ctx, &scrapeOutput); err != nil {
