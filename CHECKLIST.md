@@ -63,7 +63,7 @@
 - [ x ] Investigate LLM often skips writing coverletters
 - [ x ] Investigate LLM often ignores optional fields
 - [ ] Implement viewing application data in realtime
-- [ ] Improve cover letter writing
+- [ x ] Improve cover letter writing
 - [ ] Refactor cover letter tool so it can be used as a standalone feature
 - [ ] Fix question-answer deduplication
 - [ ] Implement email notifications on successful/failed applications, comments on feedback and user action required. (Mailjet)

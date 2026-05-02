@@ -2,7 +2,6 @@ package coverletter
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"text/template"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/SomtoJF/iris-worker/activity/browser"
 	sqldb "github.com/SomtoJF/iris-worker/activity/sqldb"
-	"github.com/SomtoJF/iris-worker/aipi/types"
 	"github.com/SomtoJF/iris-worker/helper"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
@@ -42,8 +40,25 @@ type coverLetterPromptData struct {
 	CompanyPages     []sqldb.WebsiteCachePage `json:"company_pages"`
 }
 
+type taskPriorities struct {
+	MostImportant []string `json:"most_important"`
+	LessImportant []string `json:"less_important"`
+	Negotiable    []string `json:"negotiable"`
+}
+
+type qualificationMatch struct {
+	Requirement   string `json:"requirement"`
+	Qualification string `json:"qualification"`
+	StoryTheme    string `json:"story_theme"`
+	Connection    string `json:"connection"`
+}
+
 type coverLetterLLMResponse struct {
-	CoverLetter string `json:"cover_letter"`
+	TasksOrSkills        taskPriorities       `json:"tasks_or_skills"`
+	QualificationMatches []qualificationMatch `json:"qualification_matches"`
+	CompanyReasons       []string             `json:"company_reasons"`
+	SummaryStatement     string               `json:"summary_statement"`
+	CoverLetter          string               `json:"cover_letter"`
 }
 
 func SetTemplates() {
@@ -144,118 +159,4 @@ func executeTemplateToString(t *template.Template, data any) (string, error) {
 		return "", err
 	}
 	return buf.String(), nil
-}
-
-func generateCoverLetter(ctx workflow.Context, systemPrompt, userPrompt string, idUser uint, idJobApplication uint) (coverLetterLLMResponse, error) {
-	resp, err := callCoverLetterLLM(ctx, systemPrompt, userPrompt, idUser, idJobApplication)
-	if err != nil {
-		return coverLetterLLMResponse{}, err
-	}
-
-	if isValidCoverLetter(resp.CoverLetter) {
-		resp.CoverLetter = normalizeParagraphs(resp.CoverLetter)
-		return resp, nil
-	}
-
-	repairUserPrompt := fmt.Sprintf(
-		"%s\n\n<repair_request>\nThe previous output did not meet the requirements.\nRewrite it so it is exactly 3 paragraphs (separated by one blank line) and no more than 450 words.\nReturn ONLY valid JSON matching the schema.\n</repair_request>\n\n<previous_output>\n%s\n</previous_output>\n",
-		userPrompt,
-		resp.CoverLetter,
-	)
-
-	resp2, err := callCoverLetterLLM(ctx, systemPrompt, repairUserPrompt, idUser, idJobApplication)
-	if err != nil {
-		return coverLetterLLMResponse{}, err
-	}
-	if !isValidCoverLetter(resp2.CoverLetter) {
-		return coverLetterLLMResponse{}, fmt.Errorf("cover letter failed validation after retry")
-	}
-	resp2.CoverLetter = normalizeParagraphs(resp2.CoverLetter)
-	return resp2, nil
-}
-
-func callCoverLetterLLM(ctx workflow.Context, systemPrompt, userPrompt string, idUser uint, idJobApplication uint) (coverLetterLLMResponse, error) {
-	llmRequest := types.AIPIRequest{
-		SystemMessage:    systemPrompt,
-		UserMessage:      userPrompt,
-		Model:            "x-ai/grok-4.1-fast",
-		ResponseSchema:   getCoverLetterResponseSchema(),
-		IdUser:           idUser,
-		IdJobApplication: &idJobApplication,
-	}
-
-	var llmResponse types.AIPIResponse
-	if err := workflow.ExecuteActivity(ctx, "CallLLM", llmRequest).Get(ctx, &llmResponse); err != nil {
-		return coverLetterLLMResponse{}, fmt.Errorf("CallLLM: %w", err)
-	}
-
-	var out coverLetterLLMResponse
-	if err := json.Unmarshal([]byte(llmResponse.Content), &out); err != nil {
-		return coverLetterLLMResponse{}, fmt.Errorf("unmarshal cover letter response: %w", err)
-	}
-	out.CoverLetter = strings.TrimSpace(out.CoverLetter)
-	return out, nil
-}
-
-func getCoverLetterResponseSchema() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"cover_letter": map[string]interface{}{
-				"type":        "string",
-				"description": "The complete cover letter text, exactly 3 paragraphs, separated by one blank line.",
-			},
-		},
-		"required": []string{"cover_letter"},
-	}
-}
-
-func normalizeParagraphs(s string) string {
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	s = strings.TrimSpace(s)
-	parts := splitParagraphs(s)
-	if len(parts) != 3 {
-		return s
-	}
-	return strings.Join(parts, "\n\n")
-}
-
-func isValidCoverLetter(s string) bool {
-	s = strings.TrimSpace(strings.ReplaceAll(s, "\r\n", "\n"))
-	if s == "" {
-		return false
-	}
-	if len(strings.Fields(s)) > 450 {
-		return false
-	}
-	paragraphs := splitParagraphs(s)
-	return len(paragraphs) == 3
-}
-
-func splitParagraphs(s string) []string {
-	// Split on one-or-more blank lines.
-	raw := strings.Split(s, "\n")
-	var paragraphs []string
-	var cur []string
-
-	flush := func() {
-		if len(cur) == 0 {
-			return
-		}
-		p := strings.TrimSpace(strings.Join(cur, "\n"))
-		if p != "" {
-			paragraphs = append(paragraphs, p)
-		}
-		cur = nil
-	}
-
-	for _, line := range raw {
-		if strings.TrimSpace(line) == "" {
-			flush()
-			continue
-		}
-		cur = append(cur, line)
-	}
-	flush()
-	return paragraphs
 }

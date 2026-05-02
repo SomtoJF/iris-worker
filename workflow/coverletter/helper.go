@@ -2,6 +2,7 @@ package coverletter
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"strings"
 
@@ -273,6 +274,107 @@ func concurrentScrapePages(ctx workflow.Context, results []web.SerperOrganicResu
 	return nonEmpty
 }
 
+func generateCoverLetter(ctx workflow.Context, systemPrompt, userPrompt string, idUser uint, idJobApplication uint) (coverLetterLLMResponse, error) {
+	resp, err := callCoverLetterLLM(ctx, systemPrompt, userPrompt, idUser, idJobApplication)
+	if err != nil {
+		return coverLetterLLMResponse{}, err
+	}
+
+	if isValidCoverLetter(resp.CoverLetter) {
+		resp.CoverLetter = normalizeParagraphs(resp.CoverLetter)
+		return resp, nil
+	}
+
+	repairUserPrompt := fmt.Sprintf(
+		"%s\n\n<repair_request>\nThe previous output did not meet the requirements.\nRewrite it so it is exactly 3 paragraphs (separated by one blank line) and no more than 450 words.\nReturn ONLY valid JSON matching the schema.\n</repair_request>\n\n<previous_output>\n%s\n</previous_output>\n",
+		userPrompt,
+		resp.CoverLetter,
+	)
+
+	resp2, err := callCoverLetterLLM(ctx, systemPrompt, repairUserPrompt, idUser, idJobApplication)
+	if err != nil {
+		return coverLetterLLMResponse{}, err
+	}
+	if !isValidCoverLetter(resp2.CoverLetter) {
+		return coverLetterLLMResponse{}, fmt.Errorf("cover letter failed validation after retry")
+	}
+	resp2.CoverLetter = normalizeParagraphs(resp2.CoverLetter)
+	return resp2, nil
+}
+
+func callCoverLetterLLM(ctx workflow.Context, systemPrompt, userPrompt string, idUser uint, idJobApplication uint) (coverLetterLLMResponse, error) {
+	llmRequest := types.AIPIRequest{
+		SystemMessage:    systemPrompt,
+		UserMessage:      userPrompt,
+		Model:            "x-ai/grok-4.1-fast",
+		ResponseSchema:   getCoverLetterResponseSchema(),
+		IdUser:           idUser,
+		IdJobApplication: &idJobApplication,
+	}
+
+	var llmResponse types.AIPIResponse
+	if err := workflow.ExecuteActivity(ctx, "CallLLM", llmRequest).Get(ctx, &llmResponse); err != nil {
+		return coverLetterLLMResponse{}, fmt.Errorf("CallLLM: %w", err)
+	}
+
+	var out coverLetterLLMResponse
+	if err := json.Unmarshal([]byte(llmResponse.Content), &out); err != nil {
+		return coverLetterLLMResponse{}, fmt.Errorf("unmarshal cover letter response: %w", err)
+	}
+	out.CoverLetter = strings.TrimSpace(out.CoverLetter)
+	return out, nil
+}
+
+func normalizeParagraphs(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.TrimSpace(s)
+	parts := splitParagraphs(s)
+	if len(parts) != 3 {
+		return s
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func isValidCoverLetter(s string) bool {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\r\n", "\n"))
+	if s == "" {
+		return false
+	}
+	if len(strings.Fields(s)) > 450 {
+		return false
+	}
+	paragraphs := splitParagraphs(s)
+	return len(paragraphs) == 3
+}
+
+func splitParagraphs(s string) []string {
+	// Split on one-or-more blank lines.
+	raw := strings.Split(s, "\n")
+	var paragraphs []string
+	var cur []string
+
+	flush := func() {
+		if len(cur) == 0 {
+			return
+		}
+		p := strings.TrimSpace(strings.Join(cur, "\n"))
+		if p != "" {
+			paragraphs = append(paragraphs, p)
+		}
+		cur = nil
+	}
+
+	for _, line := range raw {
+		if strings.TrimSpace(line) == "" {
+			flush()
+			continue
+		}
+		cur = append(cur, line)
+	}
+	flush()
+	return paragraphs
+}
+
 // ── response schema ──
 
 func getLLMFilterResponseSchema() map[string]interface{} {
@@ -310,5 +412,91 @@ func getLLMFilterResponseSchema() map[string]interface{} {
 			},
 		},
 		"required": []string{"company_domain", "results"},
+	}
+}
+
+func getCoverLetterResponseSchema() map[string]interface{} {
+	storyThemes := []string{
+		"Leading People",
+		"Taking Initiative",
+		"Affinity for Challenging Work",
+		"Affinity for Different Types of Work",
+		"Affinity for Specific Work",
+		"Dealing with Failure",
+		"Managing Conflict",
+		"Driven by Curiosity",
+	}
+
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"tasks_or_skills": map[string]interface{}{
+				"type":        "object",
+				"description": "Job description requirements categorized by importance.",
+				"properties": map[string]interface{}{
+					"most_important": map[string]interface{}{
+						"type":        "array",
+						"items":       map[string]interface{}{"type": "string"},
+						"description": "Top 2-3 requirements the employer emphasizes most.",
+					},
+					"less_important": map[string]interface{}{
+						"type":        "array",
+						"items":       map[string]interface{}{"type": "string"},
+						"description": "Secondary requirements.",
+					},
+					"negotiable": map[string]interface{}{
+						"type":        "array",
+						"items":       map[string]interface{}{"type": "string"},
+						"description": "Nice-to-have or preferred requirements.",
+					},
+				},
+				"required": []string{"most_important", "less_important", "negotiable"},
+			},
+			"qualification_matches": map[string]interface{}{
+				"type":        "array",
+				"description": "Exactly 2 matches: each maps a top job requirement to a candidate qualification via a story theme.",
+				"items": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"requirement": map[string]interface{}{
+							"type":        "string",
+							"description": "The job requirement being addressed.",
+						},
+						"qualification": map[string]interface{}{
+							"type":        "string",
+							"description": "The candidate's matching experience from their resume.",
+						},
+						"story_theme": map[string]interface{}{
+							"type":        "string",
+							"description": "The narrative theme framing this qualification.",
+							"enum":        storyThemes,
+						},
+						"connection": map[string]interface{}{
+							"type":        "string",
+							"description": "One sentence: theme context -> achievement -> result tied to requirement.",
+						},
+					},
+					"required": []string{"requirement", "qualification", "story_theme", "connection"},
+				},
+				"minItems": 2,
+				"maxItems": 2,
+			},
+			"company_reasons": map[string]interface{}{
+				"type":        "array",
+				"items":       map[string]interface{}{"type": "string"},
+				"description": "Exactly 2 reasons: first value-driven, second industry/topical.",
+				"minItems":    2,
+				"maxItems":    2,
+			},
+			"summary_statement": map[string]interface{}{
+				"type":        "string",
+				"description": "One quantified sentence: candidate's top accomplishment + what they bring.",
+			},
+			"cover_letter": map[string]interface{}{
+				"type":        "string",
+				"description": "The complete cover letter. Exactly 3 paragraphs separated by one blank line. Max 450 words.",
+			},
+		},
+		"required": []string{"tasks_or_skills", "qualification_matches", "company_reasons", "summary_statement", "cover_letter"},
 	}
 }
