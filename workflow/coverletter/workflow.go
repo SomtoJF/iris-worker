@@ -48,19 +48,19 @@ type coverLetterLLMResponse struct {
 
 func SetTemplates() {
 	var err error
-	Templates.System, err = helper.LoadTemplate("workflow/coverletter/prompt/system.go.tmpl")
+	Templates.System, err = helper.LoadTemplate("workflow/coverletter/prompt/coverletter/system.go.tmpl")
 	if err != nil {
 		panic(err)
 	}
-	Templates.User, err = helper.LoadTemplate("workflow/coverletter/prompt/user.go.tmpl")
+	Templates.User, err = helper.LoadTemplate("workflow/coverletter/prompt/coverletter/user.go.tmpl")
 	if err != nil {
 		panic(err)
 	}
-	Templates.LLMFilterSystem, err = helper.LoadTemplate("workflow/jobapplication/prompt/llmfilter/system.go.tmpl")
+	Templates.LLMFilterSystem, err = helper.LoadTemplate("workflow/coverletter/prompt/llmfilter/system.go.tmpl")
 	if err != nil {
 		panic(err)
 	}
-	Templates.LLMFilterUser, err = helper.LoadTemplate("workflow/jobapplication/prompt/llmfilter/user.go.tmpl")
+	Templates.LLMFilterUser, err = helper.LoadTemplate("workflow/coverletter/prompt/llmfilter/user.go.tmpl")
 	if err != nil {
 		panic(err)
 	}
