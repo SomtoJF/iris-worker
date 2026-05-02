@@ -59,11 +59,12 @@
 - [ x ] Viewing application data for each application in the frontend
 - [ x ] Implement application cancelation
 - [ x ] Finish All Issues Feed
-- [ ] Implement viewing application data in realtime
 - [ x ] Users should be able to delete applications
 - [ x ] Investigate LLM often skips writing coverletters
 - [ x ] Investigate LLM often ignores optional fields
+- [ ] Implement viewing application data in realtime
 - [ ] Improve cover letter writing
+- [ ] Refactor cover letter tool so it can be used as a standalone feature
 - [ ] Fix question-answer deduplication
 - [ ] Implement email notifications on successful/failed applications, comments on feedback and user action required. (Mailjet)
 - [ ] Figure out captcha solving

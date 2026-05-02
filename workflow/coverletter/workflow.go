@@ -81,6 +81,9 @@ func CoverLetterWorkflow(ctx workflow.Context, input CoverLetterWorkflowInput) (
 		return nil, fmt.Errorf("get job application: %w", err)
 	}
 
+	// websearch about {company name} company
+	// LLM filter. Look for homepage, about us, mission/vision statement, values, etc.
+
 	promptData := coverLetterPromptData{
 		IdUser:           input.IdUser,
 		IdJobApplication: input.IdJobApplication,
