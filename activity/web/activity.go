@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -133,6 +134,13 @@ func scrapeWithSerper(targetURL string) (ScrapeWebPageOutput, error) {
 func scrapeWithColly(targetURL, domain string) (ScrapeWebPageOutput, error) {
 	var htmlContent string
 	var scrapeErr error
+	linksSet := map[string]struct{}{}
+	var links []string
+
+	baseURL, err := url.Parse(targetURL)
+	if err != nil {
+		return ScrapeWebPageOutput{}, fmt.Errorf("invalid url format: %s", targetURL)
+	}
 
 	// Create collector
 	c := colly.NewCollector(
@@ -150,6 +158,36 @@ func scrapeWithColly(targetURL, domain string) (ScrapeWebPageOutput, error) {
 	// Extract main content
 	c.OnHTML("body", func(e *colly.HTMLElement) {
 		htmlContent = tryExtractMainContent(e)
+	})
+
+	// Extract links (before converting to markdown)
+	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
+		href := strings.TrimSpace(e.Attr("href"))
+		if href == "" || strings.HasPrefix(href, "#") {
+			return
+		}
+
+		u, err := url.Parse(href)
+		if err != nil {
+			return
+		}
+
+		resolved := baseURL.ResolveReference(u)
+		resolved.Fragment = ""
+
+		if resolved.Scheme != "http" && resolved.Scheme != "https" {
+			return
+		}
+		if resolved.Host != baseURL.Host {
+			return
+		}
+
+		normalized := resolved.String()
+		if _, ok := linksSet[normalized]; ok {
+			return
+		}
+		linksSet[normalized] = struct{}{}
+		links = append(links, normalized)
 	})
 
 	// Visit URL
@@ -174,6 +212,7 @@ func scrapeWithColly(targetURL, domain string) (ScrapeWebPageOutput, error) {
 
 	// Clean up markdown
 	markdown = strings.TrimSpace(markdown)
+	markdown = sanitizeMarkdown(markdown)
 
 	return ScrapeWebPageOutput{
 		Data: markdown,
@@ -343,4 +382,46 @@ func tryExtractMainContent(e *colly.HTMLElement) string {
 	// Fallback to body
 	html, _ := e.DOM.Html()
 	return html
+}
+
+var (
+	reMarkdownImage = regexp.MustCompile(`!\[[^\]]*]\([^)]+\)`)
+	reMarkdownLink  = regexp.MustCompile(`\[(?P<text>[^\]]*)]\([^)]+\)`)
+)
+
+// sanitizeMarkdown aggressively strips link + image markdown to keep scraped text compact.
+func sanitizeMarkdown(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return s
+	}
+
+	// Drop images entirely.
+	s = reMarkdownImage.ReplaceAllString(s, "")
+
+	// Convert links to visible text only.
+	// Example: [Log in](https://...) => Log in
+	s = reMarkdownLink.ReplaceAllString(s, "${text}")
+
+	// Remove any leftover empty links from nested patterns like [![](...)](/)
+	s = strings.ReplaceAll(s, "[]", "")
+
+	// Collapse excessive blank lines introduced by removals.
+	lines := strings.Split(s, "\n")
+	out := make([]string, 0, len(lines))
+	blankRun := 0
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			blankRun++
+			if blankRun > 2 {
+				continue
+			}
+			out = append(out, "")
+			continue
+		}
+		blankRun = 0
+		out = append(out, line)
+	}
+
+	return strings.TrimSpace(strings.Join(out, "\n"))
 }
