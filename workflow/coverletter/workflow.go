@@ -24,10 +24,17 @@ type TemplateSet struct {
 var Templates TemplateSet
 
 type CoverLetterWorkflowInput struct {
-	IdJobApplication uint    `json:"id_job_application"`
-	IdUser           uint    `json:"id_user"`
-	WorkflowID       *string `json:"workflow_id,omitempty"`
-	ElementIndex     *int    `json:"element_index,omitempty"`
+	IdJobApplication uint                       `json:"id_job_application"`
+	IdUser           uint                       `json:"id_user"`
+	WorkflowID       *string                    `json:"workflow_id,omitempty"`
+	ElementIndex     *int                       `json:"element_index,omitempty"`
+	StandaloneArgs   *StandaloneCoverLetterArgs `json:"standalone_args,omitempty"`
+}
+
+type StandaloneCoverLetterArgs struct {
+	JobDescription string `json:"job_description"`
+	CompanyName    string `json:"company_name"`
+	JobTitle       string `json:"job_title"`
 }
 
 type coverLetterPromptData struct {
@@ -83,10 +90,9 @@ func SetTemplates() {
 
 func CoverLetterWorkflow(ctx workflow.Context, input CoverLetterWorkflowInput) (map[string]interface{}, error) {
 	logger := workflow.GetLogger(ctx)
-
 	logger.Info("CoverLetterWorkflow started", "input", input)
 
-	activityOptions := workflow.ActivityOptions{
+	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 2 * time.Minute,
 		RetryPolicy: &temporal.RetryPolicy{
 			InitialInterval:    time.Second,
@@ -94,63 +100,71 @@ func CoverLetterWorkflow(ctx workflow.Context, input CoverLetterWorkflowInput) (
 			MaximumInterval:    15 * time.Second,
 			MaximumAttempts:    3,
 		},
-	}
-	ctx = workflow.WithActivityOptions(ctx, activityOptions)
+	})
 
-	var resume sqldb.Resume
-	if err := workflow.ExecuteActivity(ctx, "FetchActiveUserResume", input.IdUser).Get(ctx, &resume); err != nil {
-		return nil, fmt.Errorf("fetch active user resume: %w", err)
-	}
-
-	var jobApplication sqldb.JobApplication
-	if err := workflow.ExecuteActivity(ctx, "GetJobApplication", input.IdJobApplication).Get(ctx, &jobApplication); err != nil {
-		return nil, fmt.Errorf("get job application: %w", err)
+	// fetch required data
+	data, err := fetchCoverLetterData(ctx, input)
+	if err != nil {
+		return nil, err
 	}
 
+	// Search the web for company information
 	companyPages := gatherCompanyInfo(ctx,
-		strings.TrimSpace(jobApplication.CompanyName),
-		strings.TrimSpace(jobApplication.JobDescription),
+		strings.TrimSpace(data.JobApplication.CompanyName),
+		strings.TrimSpace(data.JobApplication.JobDescription),
 		input.IdUser, input.IdJobApplication)
 
+	// Generate the cover letter
+	out, err := generateCoverLetterFromData(ctx, input, data, companyPages)
+	if err != nil {
+		return nil, err
+	}
+
+	// Type the cover letter
+	if input.WorkflowID == nil || input.ElementIndex == nil {
+		if err := typeCoverLetter(ctx, input, out.CoverLetter); err != nil {
+			return nil, err
+		}
+	}
+
+	return map[string]interface{}{
+		"cover_letter": out.CoverLetter,
+		"word_count":   len(strings.Fields(out.CoverLetter)),
+	}, nil
+}
+
+func generateCoverLetterFromData(ctx workflow.Context, input CoverLetterWorkflowInput, data coverLetterFetchedData, companyPages []sqldb.WebsiteCachePage) (coverLetterLLMResponse, error) {
 	promptData := coverLetterPromptData{
 		IdUser:           input.IdUser,
 		IdJobApplication: input.IdJobApplication,
-		CompanyName:      strings.TrimSpace(jobApplication.CompanyName),
-		JobTitle:         strings.TrimSpace(jobApplication.JobTitle),
-		JobDescription:   strings.TrimSpace(jobApplication.JobDescription),
-		CandidateResume:  strings.TrimSpace(resume.Content),
+		CompanyName:      strings.TrimSpace(data.JobApplication.CompanyName),
+		JobTitle:         strings.TrimSpace(data.JobApplication.JobTitle),
+		JobDescription:   strings.TrimSpace(data.JobApplication.JobDescription),
+		CandidateResume:  strings.TrimSpace(data.Resume.Content),
 		CompanyPages:     companyPages,
 	}
 
 	systemPrompt, err := executeTemplateToString(Templates.System, promptData)
 	if err != nil {
-		return nil, fmt.Errorf("render system prompt: %w", err)
+		return coverLetterLLMResponse{}, fmt.Errorf("render system prompt: %w", err)
 	}
 	userPrompt, err := executeTemplateToString(Templates.User, promptData)
 	if err != nil {
-		return nil, fmt.Errorf("render user prompt: %w", err)
+		return coverLetterLLMResponse{}, fmt.Errorf("render user prompt: %w", err)
 	}
 
-	out, err := generateCoverLetter(ctx, systemPrompt, userPrompt, input.IdUser, input.IdJobApplication)
-	if err != nil {
-		return nil, err
-	}
+	return generateCoverLetter(ctx, systemPrompt, userPrompt, input.IdUser, input.IdJobApplication)
+}
 
-	if input.WorkflowID != nil || input.ElementIndex != nil {
-		if err := workflow.ExecuteActivity(ctx, "Type", browser.TypeInput{
-			WorkflowID:   *input.WorkflowID,
-			ElementIndex: *input.ElementIndex,
-			Text:         out.CoverLetter,
-		}).Get(ctx, nil); err != nil {
-			return nil, fmt.Errorf("type cover letter: %w", err)
-		}
+func typeCoverLetter(ctx workflow.Context, input CoverLetterWorkflowInput, coverLetter string) error {
+	if err := workflow.ExecuteActivity(ctx, "Type", browser.TypeInput{
+		WorkflowID:   *input.WorkflowID,
+		ElementIndex: *input.ElementIndex,
+		Text:         coverLetter,
+	}).Get(ctx, nil); err != nil {
+		return fmt.Errorf("type cover letter: %w", err)
 	}
-
-	wordCount := len(strings.Fields(out.CoverLetter))
-	return map[string]interface{}{
-		"cover_letter": out.CoverLetter,
-		"word_count":   wordCount,
-	}, nil
+	return nil
 }
 
 func executeTemplateToString(t *template.Template, data any) (string, error) {

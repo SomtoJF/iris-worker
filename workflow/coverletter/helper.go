@@ -56,6 +56,27 @@ var blockedPathSegments = []string{
 	"leadership", "privacy", "conditions", "policy",
 }
 
+// ── data fetching ──
+
+type coverLetterFetchedData struct {
+	Resume         sqldb.Resume
+	JobApplication sqldb.JobApplication
+}
+
+func fetchCoverLetterData(ctx workflow.Context, input CoverLetterWorkflowInput) (coverLetterFetchedData, error) {
+	var data coverLetterFetchedData
+
+	if err := workflow.ExecuteActivity(ctx, "FetchActiveUserResume", input.IdUser).Get(ctx, &data.Resume); err != nil {
+		return data, fmt.Errorf("fetch active user resume: %w", err)
+	}
+
+	if err := workflow.ExecuteActivity(ctx, "GetJobApplication", input.IdJobApplication).Get(ctx, &data.JobApplication); err != nil {
+		return data, fmt.Errorf("get job application: %w", err)
+	}
+
+	return data, nil
+}
+
 // ── orchestrator ──
 
 func gatherCompanyInfo(ctx workflow.Context, companyName, jobDescription string, idUser, idJobApplication uint) []sqldb.WebsiteCachePage {
