@@ -1,0 +1,29 @@
+<user>
+  <request>
+    Apply the edit instructions below to the current cover letter.
+    Change only what the instructions require. Follow the system requirements exactly.
+  </request>
+
+  <edit_instructions>
+{{.EditInstructions}}
+  </edit_instructions>
+
+  <current_cover_letter>
+{{.CurrentCoverLetter}}
+  </current_cover_letter>
+
+  <grounding>
+    <job>
+      <company_name>{{.CompanyName}}</company_name>
+      <job_title>{{.JobTitle}}</job_title>
+      <job_description>
+{{.JobDescription}}
+      </job_description>
+    </job>
+    <candidate>
+      <resume>
+{{.CandidateResume}}
+      </resume>
+    </candidate>
+  </grounding>
+</user>

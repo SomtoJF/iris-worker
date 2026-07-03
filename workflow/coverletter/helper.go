@@ -50,6 +50,7 @@ type indexedScrapeResult struct {
 
 const MAX_SCRAPED_CONTENT_LEN = 3000
 const MAX_PAGES_TO_SCRAPE = 4
+const COVER_LETTER_MODEL = "deepseek/deepseek-v4-pro"
 
 var blockedPathSegments = []string{
 	"investor", "career", "partner", "product", "feature",
@@ -59,19 +60,27 @@ var blockedPathSegments = []string{
 // ── data fetching ──
 
 type coverLetterFetchedData struct {
-	Resume         sqldb.Resume
-	JobApplication sqldb.JobApplication
+	Resume             sqldb.Resume
+	JobApplication     sqldb.JobApplication
+	CurrentCoverLetter *string
 }
 
-func fetchCoverLetterData(ctx workflow.Context, input CoverLetterWorkflowInput) (coverLetterFetchedData, error) {
+func fetchCoverLetterData(ctx workflow.Context, input CoverLetterWorkflowInput, isEditMode bool) (coverLetterFetchedData, error) {
 	var data coverLetterFetchedData
 
 	if err := workflow.ExecuteActivity(ctx, "FetchActiveUserResume", input.IdUser).Get(ctx, &data.Resume); err != nil {
 		return data, fmt.Errorf("fetch active user resume: %w", err)
 	}
 
-	if err := workflow.ExecuteActivity(ctx, "GetJobApplication", input.IdJobApplication).Get(ctx, &data.JobApplication); err != nil {
+	if err := workflow.ExecuteActivity(ctx, "GetJobApplication", sqldb.GetJobApplicationInput{
+		IdJobApplication:          input.IdJobApplication,
+		IncludeJobApplicationData: isEditMode,
+	}).Get(ctx, &data.JobApplication); err != nil {
 		return data, fmt.Errorf("get job application: %w", err)
+	}
+
+	if isEditMode && data.JobApplication.JobApplicationData != nil {
+		data.CurrentCoverLetter = data.JobApplication.JobApplicationData.CoverLetter
 	}
 
 	return data, nil
@@ -327,7 +336,7 @@ func callCoverLetterLLM(ctx workflow.Context, systemPrompt, userPrompt string, i
 	llmRequest := types.AIPIRequest{
 		SystemMessage:    systemPrompt,
 		UserMessage:      userPrompt,
-		Model:            "x-ai/grok-4.1-fast",
+		Model:            COVER_LETTER_MODEL,
 		ResponseSchema:   getCoverLetterResponseSchema(),
 		IdUser:           idUser,
 		IdJobApplication: &idJobApplication,
@@ -341,6 +350,59 @@ func callCoverLetterLLM(ctx workflow.Context, systemPrompt, userPrompt string, i
 	var out coverLetterLLMResponse
 	if err := json.Unmarshal([]byte(llmResponse.Content), &out); err != nil {
 		return coverLetterLLMResponse{}, fmt.Errorf("unmarshal cover letter response: %w", err)
+	}
+	out.CoverLetter = strings.TrimSpace(out.CoverLetter)
+	return out, nil
+}
+
+// editCoverLetter runs the lightweight edit call: single-field schema, one
+// validation-retry, same model as the full write.
+func editCoverLetter(ctx workflow.Context, systemPrompt, userPrompt string, idUser uint, idJobApplication uint) (coverLetterLLMResponse, error) {
+	resp, err := callEditCoverLetterLLM(ctx, systemPrompt, userPrompt, idUser, idJobApplication)
+	if err != nil {
+		return coverLetterLLMResponse{}, err
+	}
+
+	if isValidCoverLetter(resp.CoverLetter) {
+		resp.CoverLetter = normalizeParagraphs(resp.CoverLetter)
+		return resp, nil
+	}
+
+	repairUserPrompt := fmt.Sprintf(
+		"%s\n\n<repair_request>\nThe previous output did not meet the requirements.\nRewrite it so it is exactly 3 paragraphs (separated by one blank line) and no more than 450 words, while still applying the edit instructions.\nReturn ONLY valid JSON matching the schema.\n</repair_request>\n\n<previous_output>\n%s\n</previous_output>\n",
+		userPrompt,
+		resp.CoverLetter,
+	)
+
+	resp2, err := callEditCoverLetterLLM(ctx, systemPrompt, repairUserPrompt, idUser, idJobApplication)
+	if err != nil {
+		return coverLetterLLMResponse{}, err
+	}
+	if !isValidCoverLetter(resp2.CoverLetter) {
+		return coverLetterLLMResponse{}, fmt.Errorf("edited cover letter failed validation after retry")
+	}
+	resp2.CoverLetter = normalizeParagraphs(resp2.CoverLetter)
+	return resp2, nil
+}
+
+func callEditCoverLetterLLM(ctx workflow.Context, systemPrompt, userPrompt string, idUser uint, idJobApplication uint) (coverLetterLLMResponse, error) {
+	llmRequest := types.AIPIRequest{
+		SystemMessage:    systemPrompt,
+		UserMessage:      userPrompt,
+		Model:            COVER_LETTER_MODEL,
+		ResponseSchema:   getEditCoverLetterResponseSchema(),
+		IdUser:           idUser,
+		IdJobApplication: &idJobApplication,
+	}
+
+	var llmResponse types.AIPIResponse
+	if err := workflow.ExecuteActivity(ctx, "CallLLM", llmRequest).Get(ctx, &llmResponse); err != nil {
+		return coverLetterLLMResponse{}, fmt.Errorf("CallLLM: %w", err)
+	}
+
+	var out coverLetterLLMResponse
+	if err := json.Unmarshal([]byte(llmResponse.Content), &out); err != nil {
+		return coverLetterLLMResponse{}, fmt.Errorf("unmarshal edited cover letter response: %w", err)
 	}
 	out.CoverLetter = strings.TrimSpace(out.CoverLetter)
 	return out, nil
@@ -519,5 +581,20 @@ func getCoverLetterResponseSchema() map[string]interface{} {
 			},
 		},
 		"required": []string{"tasks_or_skills", "qualification_matches", "company_reasons", "summary_statement", "cover_letter"},
+	}
+}
+
+// getEditCoverLetterResponseSchema is the lightweight schema for edit mode: just
+// the revised cover letter, no analysis fields.
+func getEditCoverLetterResponseSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"cover_letter": map[string]interface{}{
+				"type":        "string",
+				"description": "The revised cover letter. Exactly 3 paragraphs separated by one blank line. Max 450 words.",
+			},
+		},
+		"required": []string{"cover_letter"},
 	}
 }

@@ -38,9 +38,18 @@ func (a *Activity) UpdateJobApplication(ctx context.Context, input UpdateJobAppl
 	return nil
 }
 
-func (a *Activity) GetJobApplication(ctx context.Context, idJobApplication uint) (JobApplication, error) {
+type GetJobApplicationInput struct {
+	IdJobApplication          uint `json:"id_job_application"`
+	IncludeJobApplicationData bool `json:"include_job_application_data"`
+}
+
+func (a *Activity) GetJobApplication(ctx context.Context, input GetJobApplicationInput) (JobApplication, error) {
 	var jobApplication JobApplication
-	if err := a.db.Model(&JobApplication{}).Where("id_job_application = ?", idJobApplication).First(&jobApplication).Error; err != nil {
+	db := a.db.Model(&JobApplication{})
+	if input.IncludeJobApplicationData {
+		db = db.Preload("JobApplicationData")
+	}
+	if err := db.Where("id_job_application = ?", input.IdJobApplication).First(&jobApplication).Error; err != nil {
 		return JobApplication{}, err
 	}
 	return jobApplication, nil

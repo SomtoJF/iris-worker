@@ -221,7 +221,9 @@ func createUserAction(ctx workflow.Context, input sqldb.CreateUserActionInput) (
 
 func getJobApplication(ctx workflow.Context, idJobApplication uint) (sqldb.JobApplication, error) {
 	var jobApp sqldb.JobApplication
-	err := workflow.ExecuteActivity(ctx, "GetJobApplication", idJobApplication).Get(ctx, &jobApp)
+	err := workflow.ExecuteActivity(ctx, "GetJobApplication", sqldb.GetJobApplicationInput{
+		IdJobApplication: idJobApplication,
+	}).Get(ctx, &jobApp)
 	return jobApp, err
 }
 

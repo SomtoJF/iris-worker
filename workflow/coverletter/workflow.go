@@ -7,7 +7,6 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/SomtoJF/iris-worker/activity/browser"
 	sqldb "github.com/SomtoJF/iris-worker/activity/sqldb"
 	"github.com/SomtoJF/iris-worker/helper"
 	"go.temporal.io/sdk/temporal"
@@ -17,6 +16,8 @@ import (
 type TemplateSet struct {
 	System          *template.Template
 	User            *template.Template
+	EditSystem      *template.Template
+	EditUser        *template.Template
 	LLMFilterSystem *template.Template
 	LLMFilterUser   *template.Template
 }
@@ -29,12 +30,14 @@ type CoverLetterWorkflowInput struct {
 	WorkflowID       *string           `json:"workflow_id,omitempty"`
 	ElementIndex     *int              `json:"element_index,omitempty"`
 	EditInstructions *EditInstructions `json:"edit_instructions,omitempty"`
+	// UltraWrite only applies when EditInstructions is set: true runs the full
+	// analysis write instead of the lightweight edit. Ignored when generating
+	// from scratch (no EditInstructions), where the full analysis always runs.
+	UltraWrite bool `json:"ultra_write,omitempty"`
 }
 
 type EditInstructions struct {
-	CurrentCoverLetter   string `json:"current_cover_letter"`
-	Instructions         string `json:"instructions"`
-	IdJobApplicationData uint   `json:"id_job_application_data"`
+	Instructions string `json:"instructions"`
 }
 
 type coverLetterPromptData struct {
@@ -45,6 +48,15 @@ type coverLetterPromptData struct {
 	JobDescription   string                   `json:"job_description"`
 	CandidateResume  string                   `json:"candidate_resume"`
 	CompanyPages     []sqldb.WebsiteCachePage `json:"company_pages"`
+}
+
+type editCoverLetterPromptData struct {
+	CompanyName        string `json:"company_name"`
+	JobTitle           string `json:"job_title"`
+	JobDescription     string `json:"job_description"`
+	CandidateResume    string `json:"candidate_resume"`
+	CurrentCoverLetter string `json:"current_cover_letter"`
+	EditInstructions   string `json:"edit_instructions"`
 }
 
 type taskPriorities struct {
@@ -78,6 +90,14 @@ func SetTemplates() {
 	if err != nil {
 		panic(err)
 	}
+	Templates.EditSystem, err = helper.LoadTemplate("workflow/coverletter/prompt/edit/system.go.tmpl")
+	if err != nil {
+		panic(err)
+	}
+	Templates.EditUser, err = helper.LoadTemplate("workflow/coverletter/prompt/edit/user.go.tmpl")
+	if err != nil {
+		panic(err)
+	}
 	Templates.LLMFilterSystem, err = helper.LoadTemplate("workflow/coverletter/prompt/llmfilter/system.go.tmpl")
 	if err != nil {
 		panic(err)
@@ -102,35 +122,67 @@ func CoverLetterWorkflow(ctx workflow.Context, input CoverLetterWorkflowInput) (
 		},
 	})
 
-	// fetch required data
-	data, err := fetchCoverLetterData(ctx, input)
+	isEditMode := input.EditInstructions != nil
+	// UltraWrite only matters in edit mode. Full analysis runs when generating
+	// from scratch, or when editing with UltraWrite explicitly requested.
+	isFullAnalysis := !isEditMode || input.UltraWrite
+
+	// fetch required data (preloads JobApplicationData only when editing)
+	data, err := fetchCoverLetterData(ctx, input, isEditMode)
 	if err != nil {
 		return nil, err
 	}
 
-	// Search the web for company information
-	companyPages := gatherCompanyInfo(ctx,
-		strings.TrimSpace(data.JobApplication.CompanyName),
-		strings.TrimSpace(data.JobApplication.JobDescription),
-		input.IdUser, input.IdJobApplication)
-
-	// Generate the cover letter
-	out, err := generateCoverLetterFromData(ctx, input, data, companyPages)
+	out, err := generateCoverLetterForInput(ctx, input, data, isFullAnalysis)
 	if err != nil {
 		return nil, err
-	}
-
-	// Type the cover letter
-	if input.WorkflowID == nil || input.ElementIndex == nil {
-		if err := typeCoverLetter(ctx, input, out.CoverLetter); err != nil {
-			return nil, err
-		}
 	}
 
 	return map[string]interface{}{
 		"cover_letter": out.CoverLetter,
 		"word_count":   len(strings.Fields(out.CoverLetter)),
 	}, nil
+}
+
+// generateCoverLetterForInput routes between the full-analysis write and the
+// lightweight edit based on isFullAnalysis. Web research runs only for the
+// full-analysis path.
+func generateCoverLetterForInput(ctx workflow.Context, input CoverLetterWorkflowInput, data coverLetterFetchedData, isFullAnalysis bool) (coverLetterLLMResponse, error) {
+	if isFullAnalysis {
+		companyPages := gatherCompanyInfo(ctx,
+			strings.TrimSpace(data.JobApplication.CompanyName),
+			strings.TrimSpace(data.JobApplication.JobDescription),
+			input.IdUser, input.IdJobApplication)
+		return generateCoverLetterFromData(ctx, input, data, companyPages)
+	}
+
+	if data.CurrentCoverLetter == nil || strings.TrimSpace(*data.CurrentCoverLetter) == "" {
+		return coverLetterLLMResponse{}, fmt.Errorf("cannot edit: no existing cover letter for job application %d", input.IdJobApplication)
+	}
+
+	return generateEditedCoverLetter(ctx, input, data)
+}
+
+func generateEditedCoverLetter(ctx workflow.Context, input CoverLetterWorkflowInput, data coverLetterFetchedData) (coverLetterLLMResponse, error) {
+	promptData := editCoverLetterPromptData{
+		CompanyName:        strings.TrimSpace(data.JobApplication.CompanyName),
+		JobTitle:           strings.TrimSpace(data.JobApplication.JobTitle),
+		JobDescription:     strings.TrimSpace(data.JobApplication.JobDescription),
+		CandidateResume:    strings.TrimSpace(data.Resume.Content),
+		CurrentCoverLetter: strings.TrimSpace(*data.CurrentCoverLetter),
+		EditInstructions:   strings.TrimSpace(input.EditInstructions.Instructions),
+	}
+
+	systemPrompt, err := executeTemplateToString(Templates.EditSystem, promptData)
+	if err != nil {
+		return coverLetterLLMResponse{}, fmt.Errorf("render edit system prompt: %w", err)
+	}
+	userPrompt, err := executeTemplateToString(Templates.EditUser, promptData)
+	if err != nil {
+		return coverLetterLLMResponse{}, fmt.Errorf("render edit user prompt: %w", err)
+	}
+
+	return editCoverLetter(ctx, systemPrompt, userPrompt, input.IdUser, input.IdJobApplication)
 }
 
 func generateCoverLetterFromData(ctx workflow.Context, input CoverLetterWorkflowInput, data coverLetterFetchedData, companyPages []sqldb.WebsiteCachePage) (coverLetterLLMResponse, error) {
@@ -154,17 +206,6 @@ func generateCoverLetterFromData(ctx workflow.Context, input CoverLetterWorkflow
 	}
 
 	return generateCoverLetter(ctx, systemPrompt, userPrompt, input.IdUser, input.IdJobApplication)
-}
-
-func typeCoverLetter(ctx workflow.Context, input CoverLetterWorkflowInput, coverLetter string) error {
-	if err := workflow.ExecuteActivity(ctx, "Type", browser.TypeInput{
-		WorkflowID:   *input.WorkflowID,
-		ElementIndex: *input.ElementIndex,
-		Text:         coverLetter,
-	}).Get(ctx, nil); err != nil {
-		return fmt.Errorf("type cover letter: %w", err)
-	}
-	return nil
 }
 
 func executeTemplateToString(t *template.Template, data any) (string, error) {
