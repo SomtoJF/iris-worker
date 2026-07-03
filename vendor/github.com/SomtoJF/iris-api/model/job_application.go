@@ -9,8 +9,8 @@ import (
 type JobApplicationStatus string
 
 const (
-	JobApplicationStatusPending JobApplicationStatus = "processing"
-	JobApplicationStatusApplied JobApplicationStatus = "applied"
+	JobApplicationStatusPending   JobApplicationStatus = "processing"
+	JobApplicationStatusApplied   JobApplicationStatus = "applied"
 	JobApplicationStatusFailed    JobApplicationStatus = "failed"
 	JobApplicationStatusBlocked   JobApplicationStatus = "blocked"
 	JobApplicationStatusCancelled JobApplicationStatus = "cancelled"
@@ -27,13 +27,14 @@ type JobApplication struct {
 
 	FailureReason      *string    `gorm:"type:text;default:NULL"`
 	CancellationReason *string    `gorm:"type:text;default:NULL"`
-	JobTitle       string     `gorm:"type:varchar(255);not null"`
-	CompanyName    string     `gorm:"type:varchar(255);not null"`
-	JobDescription string     `gorm:"type:text;not null"`
-	Url            string     `gorm:"not null"`
-	CreatedAt      time.Time  `gorm:"default:CURRENT_TIMESTAMP"`
-	UpdatedAt      time.Time  `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime"`
-	DeletedAt      *time.Time `gorm:"index;default:NULL"`
+	JobTitle           string     `gorm:"type:varchar(255);not null"`
+	CompanyName        string     `gorm:"type:varchar(255);not null"`
+	JobDescription     string     `gorm:"type:text;not null"`
+	Url                string     `gorm:"not null"`
+	CoverLetterOnly    bool       `gorm:"default:false"`
+	CreatedAt          time.Time  `gorm:"default:CURRENT_TIMESTAMP"`
+	UpdatedAt          time.Time  `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime"`
+	DeletedAt          *time.Time `gorm:"index;default:NULL"`
 }
 
 func (JobApplication) TableName() string {

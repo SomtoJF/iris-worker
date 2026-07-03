@@ -24,17 +24,17 @@ type TemplateSet struct {
 var Templates TemplateSet
 
 type CoverLetterWorkflowInput struct {
-	IdJobApplication uint                       `json:"id_job_application"`
-	IdUser           uint                       `json:"id_user"`
-	WorkflowID       *string                    `json:"workflow_id,omitempty"`
-	ElementIndex     *int                       `json:"element_index,omitempty"`
-	StandaloneArgs   *StandaloneCoverLetterArgs `json:"standalone_args,omitempty"`
+	IdJobApplication uint              `json:"id_job_application"`
+	IdUser           uint              `json:"id_user"`
+	WorkflowID       *string           `json:"workflow_id,omitempty"`
+	ElementIndex     *int              `json:"element_index,omitempty"`
+	EditInstructions *EditInstructions `json:"edit_instructions,omitempty"`
 }
 
-type StandaloneCoverLetterArgs struct {
-	JobDescription string `json:"job_description"`
-	CompanyName    string `json:"company_name"`
-	JobTitle       string `json:"job_title"`
+type EditInstructions struct {
+	CurrentCoverLetter   string `json:"current_cover_letter"`
+	Instructions         string `json:"instructions"`
+	IdJobApplicationData uint   `json:"id_job_application_data"`
 }
 
 type coverLetterPromptData struct {
