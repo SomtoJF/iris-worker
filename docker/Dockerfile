@@ -11,13 +11,12 @@ WORKDIR /src
 RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev \
 	&& rm -rf /var/lib/apt/lists/*
 
-COPY go.mod go.sum ./
-RUN go mod download
-
+# Deps are vendored (vendor/ includes the replaced ../iris-api module),
+# so no `go mod download` — it would try to resolve the replace path.
 COPY . .
 
 ENV CGO_ENABLED=1
-RUN go build -o /out/iris-worker main.go
+RUN go build -mod=vendor -o /out/iris-worker main.go
 
 FROM debian:bookworm-slim
 
