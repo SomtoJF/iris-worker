@@ -21,8 +21,13 @@ type BrowserFactory struct {
 // NewBrowserFactory tries to launch a new browser first; on failure it tries to connect
 // to an existing session on port 37712 (e.g. Chrome started with --remote-debugging-port=37712).
 func NewBrowserFactory(fs *fs.TemporaryFileSystem) (*BrowserFactory, error) {
+	path, _ := launcher.LookPath()
+	fmt.Println("path", path)
 	// 1. Try to launch a new browser (default launcher, fresh instance).
-	u, launchErr := launcher.New().Launch()
+	u, launchErr := launcher.New().
+		Bin(path).
+		NoSandbox(true).
+		Launch()
 	if launchErr == nil {
 		browser := rod.New().ControlURL(u)
 		if err := browser.Connect(); err != nil {
