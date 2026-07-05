@@ -35,3 +35,11 @@ func (a *Activity) FetchActiveUserResume(ctx context.Context, idUser uint) (Resu
 	}
 	return resume, nil
 }
+
+func (a *Activity) GetResumeByID(ctx context.Context, idResume uint) (Resume, error) {
+	var resume Resume
+	if err := a.db.Model(&Resume{}).Where("id_resume = ?", idResume).First(&resume).Error; err != nil {
+		return Resume{}, err
+	}
+	return resume, nil
+}

@@ -68,15 +68,15 @@ type coverLetterFetchedData struct {
 func fetchCoverLetterData(ctx workflow.Context, input CoverLetterWorkflowInput, isEditMode bool) (coverLetterFetchedData, error) {
 	var data coverLetterFetchedData
 
-	if err := workflow.ExecuteActivity(ctx, "FetchActiveUserResume", input.IdUser).Get(ctx, &data.Resume); err != nil {
-		return data, fmt.Errorf("fetch active user resume: %w", err)
-	}
-
 	if err := workflow.ExecuteActivity(ctx, "GetJobApplication", sqldb.GetJobApplicationInput{
 		IdJobApplication:          input.IdJobApplication,
 		IncludeJobApplicationData: isEditMode,
 	}).Get(ctx, &data.JobApplication); err != nil {
 		return data, fmt.Errorf("get job application: %w", err)
+	}
+
+	if err := workflow.ExecuteActivity(ctx, "GetResumeByID", data.JobApplication.ResumeId).Get(ctx, &data.Resume); err != nil {
+		return data, fmt.Errorf("get resume by id: %w", err)
 	}
 
 	if isEditMode && data.JobApplication.JobApplicationData != nil {

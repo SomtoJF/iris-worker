@@ -64,8 +64,6 @@ type JobApplicationData struct {
 	IdExternal           uuid.UUID                   `gorm:"unique;type:uuid;default:gen_random_uuid()" json:"id"`
 	UserId               uint                        `gorm:"column:id_user;not null"`
 	User                 User                        `gorm:"foreignKey:UserId;references:IdUser"`
-	ResumeId             uint                        `gorm:"column:id_resume;not null"`
-	Resume               Resume                      `gorm:"foreignKey:ResumeId;references:IdResume"`
 	JobApplicationId     uint                        `gorm:"column:id_job_application;not null;uniqueIndex"`
 	JobApplication       JobApplication              `gorm:"foreignKey:JobApplicationId;references:IdJobApplication"`
 	CoverLetter          *string                     `gorm:"type:text"`

@@ -19,6 +19,7 @@ type JobApplicationWorkflowInput struct {
 	ApplicationExternalId string `json:"application_external_id"`
 	Url                   string `json:"url"`
 	IdUser                uint   `json:"id_user"`
+	IdResume              uint   `json:"id_resume"`
 }
 
 const CancelSignalName = "CANCEL_APPLICATION"
@@ -173,7 +174,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		}
 	}
 
-	if err := saveApplicationData(ctx, input.IdUser, input.IdJobApplication, execResult.IdResume, execResult.CoverLetter, questions); err != nil {
+	if err := saveApplicationData(ctx, input.IdUser, input.IdJobApplication, execResult.CoverLetter, questions); err != nil {
 		logger.Error("Failed to save application data", "error", err)
 	}
 
@@ -181,7 +182,6 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 }
 
 type executeJobApplicationResult struct {
-	IdResume    uint
 	CoverLetter *string
 	QAMap       map[string]string
 }
@@ -195,11 +195,10 @@ func executeJobApplication(
 	jobDetails *JobDetails,
 	result *executeJobApplicationResult,
 ) error {
-	userResume, err := fetchUserResume(cancelCtx, input.IdUser)
+	userResume, err := fetchUserResume(cancelCtx, input.IdResume)
 	if err != nil {
 		return newJobAppError(err, "Failed to fetch user resume", "An error occurred while fetching your resume")
 	}
-	result.IdResume = userResume.IdResume
 
 	userProfile, err := fetchJobApplicationProfile(cancelCtx, input.IdUser)
 	if err != nil {
@@ -447,11 +446,10 @@ func mapToQuestions(qaMap map[string]string) []sqldb.JobApplicationQuestion {
 	return questions
 }
 
-func saveApplicationData(ctx workflow.Context, idUser, idJobApplication, idResume uint, coverLetter *string, questions []sqldb.JobApplicationQuestion) error {
+func saveApplicationData(ctx workflow.Context, idUser, idJobApplication uint, coverLetter *string, questions []sqldb.JobApplicationQuestion) error {
 	return workflow.ExecuteActivity(ctx, "CreateJobApplicationData", sqldb.CreateJobApplicationDataInput{
 		IdUser:           idUser,
 		IdJobApplication: idJobApplication,
-		IdResume:         idResume,
 		CoverLetter:      coverLetter,
 		Questions:        questions,
 	}).Get(ctx, nil)
@@ -468,9 +466,9 @@ func updateJobApplication(ctx workflow.Context, idJobApplication uint, data map[
 	}).Get(ctx, nil)
 }
 
-func fetchUserResume(ctx workflow.Context, idUser uint) (sqldb.Resume, error) {
+func fetchUserResume(ctx workflow.Context, idResume uint) (sqldb.Resume, error) {
 	var resume sqldb.Resume
-	if err := workflow.ExecuteActivity(ctx, "FetchActiveUserResume", idUser).Get(ctx, &resume); err != nil {
+	if err := workflow.ExecuteActivity(ctx, "GetResumeByID", idResume).Get(ctx, &resume); err != nil {
 		return sqldb.Resume{}, err
 	}
 	return resume, nil

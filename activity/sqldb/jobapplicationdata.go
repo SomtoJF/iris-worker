@@ -58,8 +58,6 @@ type JobApplicationData struct {
 	IdExternal           uuid.UUID               `gorm:"unique;type:uuid;default:gen_random_uuid()" json:"id"`
 	UserId               uint                    `gorm:"column:id_user;not null"`
 	User                 User                    `gorm:"foreignKey:UserId;references:IdUser"`
-	ResumeId             uint                    `gorm:"column:id_resume;not null"`
-	Resume               Resume                  `gorm:"foreignKey:ResumeId;references:IdResume"`
 	JobApplicationId     uint                    `gorm:"column:id_job_application;not null"`
 	JobApplication       JobApplication          `gorm:"foreignKey:JobApplicationId;references:IdJobApplication"`
 	CoverLetter          *string                 `gorm:"type:text"`
@@ -77,7 +75,6 @@ func (JobApplicationData) TableName() string {
 type CreateJobApplicationDataInput struct {
 	IdUser           uint                    `json:"id_user"`
 	IdJobApplication uint                    `json:"id_job_application"`
-	IdResume         uint                    `json:"id_resume"`
 	CoverLetter      *string                 `json:"cover_letter"`
 	Questions        []JobApplicationQuestion `json:"questions"`
 }
@@ -85,7 +82,6 @@ type CreateJobApplicationDataInput struct {
 func (a *Activity) CreateJobApplicationData(ctx context.Context, input CreateJobApplicationDataInput) error {
 	data := JobApplicationData{
 		UserId:           input.IdUser,
-		ResumeId:         input.IdResume,
 		JobApplicationId: input.IdJobApplication,
 		CoverLetter:      input.CoverLetter,
 		Questions:        JobApplicationQuestions(input.Questions),
