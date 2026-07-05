@@ -2,6 +2,7 @@ package browserfactory
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/SomtoJF/iris-worker/initializers/fs"
@@ -22,10 +23,11 @@ type BrowserFactory struct {
 // to an existing session on port 37712 (e.g. Chrome started with --remote-debugging-port=37712).
 func NewBrowserFactory(fs *fs.TemporaryFileSystem) (*BrowserFactory, error) {
 	path, _ := launcher.LookPath()
-	fmt.Println("path", path)
 	// 1. Try to launch a new browser (default launcher, fresh instance).
 	u, launchErr := launcher.New().
 		Bin(path).
+		Set("disable-dev-shm-usage").
+		Set("disable-gpu").
 		NoSandbox(true).
 		Launch()
 	if launchErr == nil {
@@ -33,8 +35,11 @@ func NewBrowserFactory(fs *fs.TemporaryFileSystem) (*BrowserFactory, error) {
 		if err := browser.Connect(); err != nil {
 			return nil, fmt.Errorf("launched browser but failed to connect: %w", err)
 		}
+		slog.Info("Successfully launched browser")
 		return &BrowserFactory{browser: browser.NoDefaultDevice(), fs: fs}, nil
 	}
+
+	slog.Warn("Failed to launch browser", "error", launchErr)
 
 	// 2. Fallback: connect to existing session (e.g. user started Chrome with --remote-debugging-port=37712).
 	existingURL, resolveErr := launcher.ResolveURL(existingSessionPort)
