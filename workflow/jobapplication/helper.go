@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"strings"
 	"text/template"
 
 	browseractivity "github.com/SomtoJF/iris-worker/activity/browser"
@@ -509,12 +510,32 @@ func retrieveJobDetails(ctx workflow.Context, url string, idUser uint, idJobAppl
 		return JobDetails{}, err
 	}
 
+	jsonPayload := stripLLMJSONFences(llmResponse.Content)
+
 	var jobDetails JobDetails
-	if err := json.Unmarshal([]byte(llmResponse.Content), &jobDetails); err != nil {
+	if err := json.Unmarshal([]byte(jsonPayload), &jobDetails); err != nil {
 		return JobDetails{}, err
 	}
 
 	return jobDetails, nil
+}
+
+// stripLLMJSONFences removes markdown code fences (e.g. ```json ... ```) so the
+// string can be passed to json.Unmarshal. If there are no fences, content is
+// returned trimmed unchanged.
+func stripLLMJSONFences(content string) string {
+	s := strings.TrimSpace(content)
+	if !strings.HasPrefix(s, "```") {
+		return s
+	}
+	s = strings.TrimSpace(strings.TrimPrefix(s, "```"))
+	if len(s) >= 4 && strings.EqualFold(s[:4], "json") {
+		s = strings.TrimSpace(s[4:])
+	}
+	if i := strings.LastIndex(s, "```"); i >= 0 {
+		s = strings.TrimSpace(s[:i])
+	}
+	return strings.TrimSpace(s)
 }
 
 func getJobDetailsResponseSchema() map[string]interface{} {
