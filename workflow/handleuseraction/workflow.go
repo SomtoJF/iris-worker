@@ -190,7 +190,7 @@ func buildUserActionLayout(ctx workflow.Context, screenshotPath string, userActi
 		SystemMessage:    buf.String(),
 		UserMessage:      "Analyze the screenshot and return the form description and layout.",
 		ImageUrl:         &screenshotBase64,
-		Model:            "x-ai/grok-4.1-fast",
+		Model:            "x-ai/grok-4.3",
 		ResponseSchema:   getUserActionResponseSchema(),
 		IdUser:           idUser,
 		IdJobApplication: &idJobApplication,

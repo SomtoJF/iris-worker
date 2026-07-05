@@ -141,7 +141,7 @@ func verifyResponseWithLLM(ctx workflow.Context, responseBody string, idUser uin
 	llmRequest := types.AIPIRequest{
 		SystemMessage:    systemPrompt,
 		UserMessage:      userPrompt,
-		Model:            "x-ai/grok-4.1-fast",
+		Model:            "x-ai/grok-4.3",
 		ResponseSchema:   getVerifyResponseSchema(),
 		IdUser:           idUser,
 		IdJobApplication: idJobApplication,

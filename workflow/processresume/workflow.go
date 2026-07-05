@@ -83,7 +83,7 @@ func processResumeContent(ctx workflow.Context, resumeContent string, idUser uin
 	llmRequest := types.AIPIRequest{
 		SystemMessage:  systemPrompt,
 		UserMessage:    userPrompt,
-		Model:          "x-ai/grok-4.1-fast",
+		Model:          "google/gemma-4-31b-it:free",
 		ResponseSchema: getResumeContentResponseSchema(),
 		IdUser:         idUser,
 	}

@@ -155,10 +155,11 @@ func getModelRates(model string) modelRates {
 		"google/gemini-3-flash-preview":                {inputRate: 0.50, outputRate: 3.0},
 		"google/gemini-3-pro-preview":                  {inputRate: 2.0, outputRate: 12.0},
 		"google/gemini-2.5-pro":                        {inputRate: 1.25, outputRate: 10.0},
+		"x-ai/grok-4.3":                                {inputRate: 1.25, outputRate: 2.50},
 		"x-ai/grok-4.1-fast":                           {inputRate: 0.20, outputRate: 0.50},
 		"x-ai/grok-4-fast":                             {inputRate: 0.20, outputRate: 0.50},
 		"google/gemma-4-31b-it:free":                   {inputRate: 0.00, outputRate: 0.00},
-		"google/gemma-4-31b-it":                        {inputRate: 0.13, outputRate: 0.38},
+		"google/gemma-4-31b-it":                        {inputRate: 0.12, outputRate: 0.35},
 	}
 
 	if rate, ok := rates[model]; ok {

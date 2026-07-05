@@ -331,7 +331,7 @@ func planNextAction(ctx workflow.Context, input PlannerRequest) (PlannerResponse
 		SystemMessage:    systemPrompt,
 		UserMessage:      userPrompt,
 		ImageUrl:         &screenshotBase64,
-		Model:            "x-ai/grok-4.1-fast",
+		Model:            "x-ai/grok-4.3",
 		ResponseSchema:   getPlannerResponseSchema(),
 		Temperature:      &temperaturePtr,
 		IdUser:           input.IdUser,
@@ -498,7 +498,7 @@ func retrieveJobDetails(ctx workflow.Context, url string, idUser uint, idJobAppl
 	llmRequest := types.AIPIRequest{
 		SystemMessage:    systemPrompt,
 		UserMessage:      userPrompt,
-		Model:            "x-ai/grok-4.1-fast",
+		Model:            "google/gemma-4-31b-it:free",
 		ResponseSchema:   getJobDetailsResponseSchema(),
 		IdUser:           idUser,
 		IdJobApplication: &idJobApplication,
