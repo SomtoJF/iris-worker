@@ -6,4 +6,5 @@ type UserAction string
 const (
 	UserActionAdditionalInfo = "USER_ACTION_ADDITIONAL_INFO"
 	UserActionOTP            = "USER_ACTION_OTP"
+	UserActionCaptcha        = "USER_ACTION_CAPTCHA"
 )

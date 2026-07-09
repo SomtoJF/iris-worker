@@ -94,3 +94,43 @@ type CheckSubmissionFallbackOutput struct {
 	DetectionMethod string `json:"detection_method"`
 	Message         string `json:"message"`
 }
+
+// Captcha types. Type values returned by DetectCaptcha.
+const (
+	CaptchaTypeNone        = "none"
+	CaptchaTypeRecaptchaV2 = "recaptcha_v2"
+	CaptchaTypeRecaptchaV3 = "recaptcha_v3"
+	CaptchaTypeTurnstile   = "turnstile"
+)
+
+type DetectCaptchaInput struct {
+	WorkflowID string `json:"workflow_id"`
+}
+
+type DetectCaptchaOutput struct {
+	Type      string            `json:"type"`       // one of CaptchaType* constants
+	SiteKey   string            `json:"site_key"`   // empty when Type == none
+	PageURL   string            `json:"page_url"`   // URL to submit to the solver
+	Action    string            `json:"action"`     // reCAPTCHA v3 action (best-effort)
+	Invisible bool              `json:"invisible"`  // v2 invisible / v3
+	Extra     map[string]string `json:"extra"`      // turnstile cData etc.
+}
+
+type InjectCaptchaTokenInput struct {
+	WorkflowID string `json:"workflow_id"`
+	Type       string `json:"type"`
+	Token      string `json:"token"`
+}
+
+type InjectCaptchaTokenOutput struct {
+	CallbackFired bool `json:"callback_fired"`
+}
+
+type ClickCaptchaButtonInput struct {
+	WorkflowID string `json:"workflow_id"`
+	Selector   string `json:"selector"` // CSS selector; searched on page and inside iframes
+}
+
+type ClickCaptchaButtonOutput struct {
+	Clicked bool `json:"clicked"`
+}
