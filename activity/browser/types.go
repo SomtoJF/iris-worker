@@ -60,37 +60,35 @@ type ClosePageInput struct {
 	WorkflowID string `json:"workflow_id"`
 }
 
-type GetFormActionInput struct {
-	WorkflowID string `json:"workflow_id"`
-}
-
-type GetFormActionOutput struct {
-	Action     string `json:"action"`
-	HasAction  bool   `json:"has_action"`
-	CurrentURL string `json:"current_url"`
-}
-
-type HijackSubmitClickInput struct {
-	WorkflowID   string `json:"workflow_id"`
-	ElementIndex int    `json:"element_index"`
-	ActionURL    string `json:"action_url"`
-}
-
-type HijackSubmitClickOutput struct {
+type CapturedRequest struct {
+	URL          string `json:"url"`
+	Method       string `json:"method"`
+	ResourceType string `json:"resource_type"`
 	StatusCode   int    `json:"status_code"`
 	ResponseBody string `json:"response_body"`
-	TimedOut     bool   `json:"timed_out"`
 }
 
-type CheckSubmissionFallbackInput struct {
+type ClickSubmitInput struct {
 	WorkflowID   string `json:"workflow_id"`
 	ElementIndex int    `json:"element_index"`
-	BeforeURL    string `json:"before_url"`
-	SkipClick    bool   `json:"skip_click"`
 }
 
-type CheckSubmissionFallbackOutput struct {
-	Submitted       bool   `json:"submitted"`
-	DetectionMethod string `json:"detection_method"`
-	Message         string `json:"message"`
+type ClickSubmitOutput struct {
+	BeforeURL    string            `json:"before_url"`
+	NewTabOpened bool              `json:"new_tab_opened"`
+	Requests     []CapturedRequest `json:"requests"`
+}
+
+type VerifySubmissionStateInput struct {
+	WorkflowID string `json:"workflow_id"`
+	BeforeURL  string `json:"before_url"`
+}
+
+type VerifySubmissionStateOutput struct {
+	CurrentURL       string   `json:"current_url"`
+	URLChanged       bool     `json:"url_changed"`
+	FormPresent      bool     `json:"form_present"`
+	SuccessText      string   `json:"success_text"`
+	ValidationErrors []string `json:"validation_errors"`
+	PageText         string   `json:"page_text"`
 }
