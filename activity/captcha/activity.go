@@ -54,27 +54,19 @@ func (a *Activity) SolveWithCapSolver(ctx context.Context, input SolveWithCapSol
 	return SolveWithCapSolverOutput{Token: token}, nil
 }
 
-// buildTask maps a detected captcha to a CapSolver task object. When EGRESS_IP_ADDRESS
-// is set, the proxied task variant is used so the solve originates from the worker's IP.
+// buildTask maps a detected captcha to a CapSolver task object. All captchas use the
+// ProxyLess task variants (CapSolver solves from its own IPs).
 func buildTask(input SolveWithCapSolverInput) (map[string]interface{}, error) {
-	egressIP := os.Getenv("EGRESS_IP_ADDRESS")
-	proxied := egressIP != ""
-
 	task := map[string]interface{}{
 		"websiteURL": input.PageURL,
 		"websiteKey": input.SiteKey,
 	}
-	if proxied {
-		// CapSolver proxy format: "ip:port" (no port available -> default 8080 assumed
-		// upstream; if a full proxy string is provided in EGRESS_IP_ADDRESS it is passed through).
-		task["proxy"] = egressIP
-	}
 
 	switch input.Type {
 	case browser.CaptchaTypeRecaptchaV2:
-		task["type"] = taskType("ReCaptchaV2Task", proxied)
+		task["type"] = "ReCaptchaV2TaskProxyLess"
 	case browser.CaptchaTypeRecaptchaV3:
-		task["type"] = taskType("ReCaptchaV3Task", proxied)
+		task["type"] = "ReCaptchaV3TaskProxyLess"
 		action := input.Action
 		if action == "" {
 			action = "submit"
@@ -82,20 +74,12 @@ func buildTask(input SolveWithCapSolverInput) (map[string]interface{}, error) {
 		task["pageAction"] = action
 		task["minScore"] = 0.7
 	case browser.CaptchaTypeTurnstile:
-		// Turnstile uses AntiTurnstileTask{ProxyLess}; proxy is not applied to it.
 		task["type"] = "AntiTurnstileTaskProxyLess"
 	default:
 		return nil, fmt.Errorf("unsupported captcha type: %s", input.Type)
 	}
 
 	return task, nil
-}
-
-func taskType(base string, proxied bool) string {
-	if proxied {
-		return base
-	}
-	return base + "ProxyLess"
 }
 
 func (a *Activity) createTask(ctx context.Context, apiKey string, task map[string]interface{}) (string, error) {

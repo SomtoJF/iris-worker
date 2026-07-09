@@ -121,10 +121,10 @@ iframe and isn't a cleanly tagged node.
 
 ## Notes / risks
 
-- **Proxy / egress IP**: worker egress IP is provided via `EGRESS_IP_ADDRESS` env var and passed to
-  CapSolver so the solve originates from the same IP as form submission (avoids token-IP-binding
-  rejection on Turnstile / reCAPTCHA Enterprise). CapSolver `createTask` includes the proxy fields
-  when `EGRESS_IP_ADDRESS` is set; if unset, falls back to `*ProxyLess` task variants.
+- **Proxy / egress IP — intentionally dropped.** No proxying of any traffic (browser, CapSolver
+  client, Serper). CapSolver always uses `*ProxyLess` task variants and solves from its own IPs.
+  Proper token-IP matching (browser `--proxy-server` + CapSolver `proxy` field sharing one real
+  forward proxy) is out of scope; revisit only if Indeed Turnstile tokens get rejected.
 - **Iframe traversal**: go-rod supports `page.Frames()` / frame `.Eval` / `.Element`; the repo
   doesn't use it yet. Detection and the post-solve click must recurse into frames.
 - **Callback discovery** varies per site; the LLM vision "needs button click?" step is the safety
