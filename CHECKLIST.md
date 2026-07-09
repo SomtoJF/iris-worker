@@ -64,7 +64,7 @@
 - [ x ] Investigate LLM often ignores optional fields
 - [ ] Implement viewing application data in realtime
 - [ x ] Improve cover letter writing
-- [ ] Refactor cover letter tool so it can be used as a standalone feature
+- [ x ] Refactor cover letter tool so it can be used as a standalone feature
 - [ ] Fix question-answer deduplication
 - [ ] Implement email notifications on successful/failed applications, comments on feedback and user action required. (Mailjet)
 - [ ] Figure out captcha solving
