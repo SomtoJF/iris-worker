@@ -11,6 +11,9 @@ make start-temporal-server
 # Start worker with hot-reload
 make start-worker
 
+# Start worker with fixed CDP port for Chrome DevTools MCP observation
+make start-worker-observe
+
 # Build binary
 go build -o iris-worker main.go
 
@@ -99,3 +102,62 @@ Required:
 ## Vendoring Rule
 
 Deploy builds (docker/Dockerfile) compile with `-mod=vendor` and never hit the network — the `replace github.com/SomtoJF/iris-api => ../iris-api` in go.mod only resolves locally. After changing worker deps OR anything in `iris-api/model`, run `go mod vendor` here and commit the vendor/ changes, otherwise the deploy builds a stale copy or fails.
+
+## Observing the local job-application browser (debugging)
+
+The worker drives Chromium via go-rod. For local testing/debugging you can attach Chrome DevTools MCP to the same browser the agent uses and watch pages, screenshots, DOM, console, and network while a `JobApplicationWorkflow` runs.
+
+### 1. Start the worker with a fixed CDP port
+
+```bash
+make start-worker-observe
+```
+
+This is the same as `make start-worker` (headed + trace + slow-mo) but pins Chrome remote debugging on **port 9222**.
+
+Confirm CDP is up:
+
+```bash
+curl -s http://127.0.0.1:9222/json/version
+```
+
+You should see a JSON payload with `webSocketDebuggerUrl`. An empty `http://127.0.0.1:9222/json/list` is normal until a workflow opens a tab.
+
+### 2. Point Chrome DevTools MCP at that browser
+
+In `~/.cursor/mcp.json` (or your Cursor MCP config), connect instead of launching a separate Chrome:
+
+```json
+{
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "npx",
+      "args": [
+        "chrome-devtools-mcp@latest",
+        "--browserUrl",
+        "http://127.0.0.1:9222"
+      ]
+    }
+  }
+}
+```
+
+Restart the MCP server in Cursor after changing this. MCP tools will fail if the observe worker is not running.
+
+### 3. Watch a run
+
+1. Keep `make start-worker-observe` running (Temporal on `localhost:7233`, Redis, etc. as usual).
+2. Trigger a job application (API `POST /jobs/apply`, client UI, or Temporal `JobApplicationWorkflow` on task queue `job-application`).
+3. From the agent/IDE, use Chrome DevTools MCP:
+   - `list_pages` — tabs the worker opened
+   - `select_page` — focus the application tab
+   - `take_screenshot` / `take_snapshot` — see what the agent sees
+   - `list_console_messages` / `list_network_requests` — debug page failures
+
+Workflow tabs appear when `OpenWebpage` runs and disappear when the session closes the page. Poll `list_pages` during the agent loop; short-lived navigations can close before a single screenshot lands.
+
+### Notes
+
+- Use `make start-worker` for normal local headed debugging without a fixed CDP port.
+- Do not use `start-worker-observe` in production/Docker; that path stays headless without an exposed debug port.
+- Multiple CDP clients can attach to the same Chromium; go-rod keeps control while MCP observes.
