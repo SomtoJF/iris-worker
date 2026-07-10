@@ -19,13 +19,70 @@ type SubmitApplicationWorkflowInput struct {
 }
 
 type submitVerifyResponse struct {
-	Success bool `json:"success"`
+	Success bool   `json:"success"`
+	Reason  string `json:"reason"`
 }
 
 func SubmitApplicationWorkflow(ctx workflow.Context, input SubmitApplicationWorkflowInput) (map[string]interface{}, error) {
 	logger := workflow.GetLogger(ctx)
 
+	clickOut, err := clickSubmit(ctx, input)
+	if err != nil {
+		logger.Error("Failed to click submit", "error", err)
+		return nil, err
+	}
+
+	verifyOut, err := verifySubmissionState(ctx, input.WorkflowID, clickOut.BeforeURL)
+	if err != nil {
+		logger.Error("Failed to verify submission state", "error", err)
+		return nil, err
+	}
+
+	if result, decided := decideDeterministically(clickOut, verifyOut); decided {
+		return result, nil
+	}
+
+	return decideWithLLM(ctx, input, clickOut, verifyOut)
+}
+
+// clickSubmit physically clicks the submit button, so it must never retry:
+// a retry after a successful click would double-submit the application.
+func clickSubmit(ctx workflow.Context, input SubmitApplicationWorkflowInput) (browser.ClickSubmitOutput, error) {
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 1 * time.Minute,
+		RetryPolicy: &temporal.RetryPolicy{
+			MaximumAttempts: 1,
+		},
+	})
+
+	var output browser.ClickSubmitOutput
+	err := workflow.ExecuteActivity(ctx, "ClickSubmitAndCapture", browser.ClickSubmitInput{
+		WorkflowID:   input.WorkflowID,
+		ElementIndex: input.ElementIndex,
+	}).Get(ctx, &output)
+	if err != nil {
+		return output, fmt.Errorf("click submit and capture: %w", err)
+	}
+	return output, nil
+}
+
+// verifySubmissionState is read-only, so it retries safely.
+func verifySubmissionState(ctx workflow.Context, workflowID string, beforeURL string) (browser.VerifySubmissionStateOutput, error) {
+	ctx = withRetryableOptions(ctx)
+
+	var output browser.VerifySubmissionStateOutput
+	err := workflow.ExecuteActivity(ctx, "VerifySubmissionState", browser.VerifySubmissionStateInput{
+		WorkflowID: workflowID,
+		BeforeURL:  beforeURL,
+	}).Get(ctx, &output)
+	if err != nil {
+		return output, fmt.Errorf("verify submission state: %w", err)
+	}
+	return output, nil
+}
+
+func withRetryableOptions(ctx workflow.Context) workflow.Context {
+	return workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 2 * time.Minute,
 		RetryPolicy: &temporal.RetryPolicy{
 			InitialInterval:    time.Second,
@@ -34,130 +91,110 @@ func SubmitApplicationWorkflow(ctx workflow.Context, input SubmitApplicationWork
 			MaximumAttempts:    3,
 		},
 	})
-
-	formAction, err := getFormAction(ctx, input.WorkflowID)
-	if err != nil {
-		logger.Error("Failed to get form action", "error", err)
-		return nil, err
-	}
-
-	if formAction.HasAction {
-		return handleNetworkInterception(ctx, input, formAction)
-	}
-
-	return handleFallbackDetection(ctx, input, formAction.CurrentURL)
 }
 
-func getFormAction(ctx workflow.Context, workflowID string) (browser.GetFormActionOutput, error) {
-	var output browser.GetFormActionOutput
-	err := workflow.ExecuteActivity(ctx, "GetFormAction", browser.GetFormActionInput{
-		WorkflowID: workflowID,
-	}).Get(ctx, &output)
-	return output, err
+// decideDeterministically resolves the clear cases without an LLM call.
+// A client-side validation failure fires no submit request, so a captured
+// 2xx/3xx submit-shaped request with no validation errors is trustworthy.
+func decideDeterministically(clickOut browser.ClickSubmitOutput, verifyOut browser.VerifySubmissionStateOutput) (map[string]interface{}, bool) {
+	best := bestSubmitRequest(clickOut.Requests)
+	hasValidationErrors := len(verifyOut.ValidationErrors) > 0
+
+	if best != nil && best.StatusCode >= 200 && best.StatusCode < 400 && !hasValidationErrors {
+		return submissionResult(true, "network",
+			fmt.Sprintf("%s %s returned %d, no validation errors on page", best.Method, best.URL, best.StatusCode)), true
+	}
+
+	if hasValidationErrors && (best == nil || best.StatusCode >= 400) {
+		return submissionResult(false, "validation_errors",
+			fmt.Sprintf("Validation errors on page: %v", verifyOut.ValidationErrors)), true
+	}
+
+	if verifyOut.SuccessText != "" && !hasValidationErrors {
+		return submissionResult(true, "success_element",
+			fmt.Sprintf("Found success text: %s", verifyOut.SuccessText)), true
+	}
+
+	if best != nil && best.StatusCode >= 400 {
+		return submissionResult(false, "network_error",
+			fmt.Sprintf("%s %s returned %d", best.Method, best.URL, best.StatusCode)), true
+	}
+
+	// Conflicting or missing signals (e.g. no submit request captured at all).
+	return nil, false
 }
 
-func handleNetworkInterception(ctx workflow.Context, input SubmitApplicationWorkflowInput, formAction browser.GetFormActionOutput) (map[string]interface{}, error) {
-	var hijackOutput browser.HijackSubmitClickOutput
-	err := workflow.ExecuteActivity(ctx, "HijackSubmitClick", browser.HijackSubmitClickInput{
-		WorkflowID:   input.WorkflowID,
-		ElementIndex: input.ElementIndex,
-		ActionURL:    formAction.Action,
-	}).Get(ctx, &hijackOutput)
-	if err != nil {
-		return nil, fmt.Errorf("hijack submit click: %w", err)
-	}
-
-	if hijackOutput.TimedOut {
-		return runFallbackAfterClick(ctx, input, formAction.CurrentURL)
-	}
-
-	if hijackOutput.StatusCode >= 200 && hijackOutput.StatusCode < 300 {
-		success, err := verifyResponseWithLLM(ctx, hijackOutput.ResponseBody, input.IdUser, input.IdJobApplication)
-		if err != nil {
-			return nil, fmt.Errorf("verify response with LLM: %w", err)
+// bestSubmitRequest prefers document navigations (classic form POST) over
+// XHR/fetch, and later requests over earlier ones.
+func bestSubmitRequest(requests []browser.CapturedRequest) *browser.CapturedRequest {
+	var best *browser.CapturedRequest
+	for i := range requests {
+		req := &requests[i]
+		if req.StatusCode == 0 {
+			continue
 		}
-		if success {
-			return map[string]interface{}{
-				"submitted": true,
-				"method":    "network_interception",
-				"message":   fmt.Sprintf("Server returned %d, LLM confirmed success", hijackOutput.StatusCode),
-			}, nil
+		if best == nil || req.ResourceType == "Document" || best.ResourceType != "Document" {
+			best = req
 		}
 	}
-
-	return map[string]interface{}{
-		"submitted": false,
-		"method":    "network_interception",
-		"message":   fmt.Sprintf("Server returned %d", hijackOutput.StatusCode),
-	}, nil
+	return best
 }
 
-func runFallbackAfterClick(ctx workflow.Context, input SubmitApplicationWorkflowInput, beforeURL string) (map[string]interface{}, error) {
-	var fallbackOutput browser.CheckSubmissionFallbackOutput
-	err := workflow.ExecuteActivity(ctx, "CheckSubmissionFallback", browser.CheckSubmissionFallbackInput{
-		WorkflowID:   input.WorkflowID,
-		ElementIndex: input.ElementIndex,
-		BeforeURL:    beforeURL,
-		SkipClick:    true,
-	}).Get(ctx, &fallbackOutput)
-	if err != nil {
-		return nil, fmt.Errorf("check submission fallback: %w", err)
-	}
+func decideWithLLM(ctx workflow.Context, input SubmitApplicationWorkflowInput, clickOut browser.ClickSubmitOutput, verifyOut browser.VerifySubmissionStateOutput) (map[string]interface{}, error) {
+	ctx = withRetryableOptions(ctx)
 
-	return map[string]interface{}{
-		"submitted": fallbackOutput.Submitted,
-		"method":    fallbackOutput.DetectionMethod,
-		"message":   fallbackOutput.Message,
-	}, nil
-}
-
-func handleFallbackDetection(ctx workflow.Context, input SubmitApplicationWorkflowInput, beforeURL string) (map[string]interface{}, error) {
-	var fallbackOutput browser.CheckSubmissionFallbackOutput
-	err := workflow.ExecuteActivity(ctx, "CheckSubmissionFallback", browser.CheckSubmissionFallbackInput{
-		WorkflowID:   input.WorkflowID,
-		ElementIndex: input.ElementIndex,
-		BeforeURL:    beforeURL,
-		SkipClick:    false,
-	}).Get(ctx, &fallbackOutput)
-	if err != nil {
-		return nil, fmt.Errorf("check submission fallback: %w", err)
-	}
-
-	return map[string]interface{}{
-		"submitted": fallbackOutput.Submitted,
-		"method":    fallbackOutput.DetectionMethod,
-		"message":   fallbackOutput.Message,
-	}, nil
-}
-
-func verifyResponseWithLLM(ctx workflow.Context, responseBody string, idUser uint, idJobApplication *uint) (bool, error) {
-	systemPrompt := "You are verifying whether an HTTP response indicates a successful job application submission. Analyze the response body and determine if the application was submitted successfully. An empty or null response body also indicates success (many servers return empty 200 responses on successful form submissions)."
-	userPrompt := fmt.Sprintf("HTTP Response Body:\n\n%s\n\nDoes this response indicate a successful job application submission?", responseBody)
-
-	if responseBody == "" {
-		return true, nil
-	}
+	systemPrompt := "You are verifying whether a job application was successfully submitted after the submit button was clicked. " +
+		"You are given the network requests captured during the click, and the state of the page afterwards. " +
+		"A captured submit request with a 2xx/3xx status strongly suggests success. " +
+		"Visible validation errors strongly suggest failure. " +
+		"A URL change or new tab alone does NOT prove success. Be conservative: only report success if the evidence supports it."
 
 	llmRequest := types.AIPIRequest{
 		SystemMessage:    systemPrompt,
-		UserMessage:      userPrompt,
+		UserMessage:      buildLLMEvidence(clickOut, verifyOut),
 		Model:            "x-ai/grok-4.3",
 		ResponseSchema:   getVerifyResponseSchema(),
-		IdUser:           idUser,
-		IdJobApplication: idJobApplication,
+		IdUser:           input.IdUser,
+		IdJobApplication: input.IdJobApplication,
 	}
 
 	var llmResponse types.AIPIResponse
 	if err := workflow.ExecuteActivity(ctx, "CallLLM", llmRequest).Get(ctx, &llmResponse); err != nil {
-		return false, fmt.Errorf("CallLLM: %w", err)
+		return nil, fmt.Errorf("CallLLM: %w", err)
 	}
 
 	var verifyResponse submitVerifyResponse
 	if err := json.Unmarshal([]byte(llmResponse.Content), &verifyResponse); err != nil {
-		return false, fmt.Errorf("unmarshal verify response: %w", err)
+		return nil, fmt.Errorf("unmarshal verify response: %w", err)
 	}
 
-	return verifyResponse.Success, nil
+	return submissionResult(verifyResponse.Success, "llm", verifyResponse.Reason), nil
+}
+
+func buildLLMEvidence(clickOut browser.ClickSubmitOutput, verifyOut browser.VerifySubmissionStateOutput) string {
+	evidence := "Network requests captured during submit click:\n"
+	if len(clickOut.Requests) == 0 {
+		evidence += "(none)\n"
+	}
+	for _, req := range clickOut.Requests {
+		evidence += fmt.Sprintf("- %s %s (%s) -> status %d\n  response body: %s\n",
+			req.Method, req.URL, req.ResourceType, req.StatusCode, req.ResponseBody)
+	}
+
+	evidence += fmt.Sprintf("\nPage state after click:\n- URL changed: %t (now %s)\n- New tab opened: %t\n- Form still present: %t\n- Success text found: %q\n- Validation errors: %v\n\nPage text:\n%s",
+		verifyOut.URLChanged, verifyOut.CurrentURL, clickOut.NewTabOpened, verifyOut.FormPresent,
+		verifyOut.SuccessText, verifyOut.ValidationErrors, verifyOut.PageText)
+
+	evidence += "\n\nWas the job application successfully submitted?"
+	return evidence
+}
+
+func submissionResult(submitted bool, method string, message string) map[string]interface{} {
+	return map[string]interface{}{
+		"submitted": submitted,
+		"method":    method,
+		"message":   message,
+	}
 }
 
 func getVerifyResponseSchema() map[string]interface{} {
@@ -166,9 +203,13 @@ func getVerifyResponseSchema() map[string]interface{} {
 		"properties": map[string]interface{}{
 			"success": map[string]interface{}{
 				"type":        "boolean",
-				"description": "Whether the response indicates a successful job application submission",
+				"description": "Whether the application was successfully submitted",
+			},
+			"reason": map[string]interface{}{
+				"type":        "string",
+				"description": "One-sentence justification citing the evidence",
 			},
 		},
-		"required": []string{"success"},
+		"required": []string{"success", "reason"},
 	}
 }
