@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/SomtoJF/iris-worker/activity/browser"
+	"github.com/SomtoJF/iris-worker/activity/captcha"
 	"github.com/SomtoJF/iris-worker/activity/llm"
 	"github.com/SomtoJF/iris-worker/activity/realtimeevent"
 	s3Activities "github.com/SomtoJF/iris-worker/activity/s3"
@@ -16,6 +17,7 @@ import (
 	"github.com/SomtoJF/iris-worker/workflow/jobapplication"
 	"github.com/SomtoJF/iris-worker/workflow/jobdiscovery"
 	"github.com/SomtoJF/iris-worker/workflow/processresume"
+	"github.com/SomtoJF/iris-worker/workflow/solvecaptcha"
 	"github.com/SomtoJF/iris-worker/workflow/submitapplication"
 	"github.com/SomtoJF/iris-worker/workflow/summarizeissue"
 	"go.temporal.io/sdk/worker"
@@ -65,6 +67,7 @@ func registerJobApplicationWorkflows(w worker.Worker) {
 	w.RegisterWorkflow(coverletter.CoverLetterWorkflow)
 	w.RegisterWorkflow(submitapplication.SubmitApplicationWorkflow)
 	w.RegisterWorkflow(handleuseraction.HandleUserActionWorkflow)
+	w.RegisterWorkflow(solvecaptcha.SolveCaptchaWorkflow)
 	w.RegisterWorkflow(jobdiscovery.JobDiscoveryWorkflow)
 	w.RegisterWorkflow(summarizeissue.SummarizeIssueWorkflow)
 }
@@ -92,6 +95,9 @@ func registerJobApplicationActivities(w worker.Worker, dependencies common.Depen
 
 	realtimeEventActivities := realtimeevent.NewActivities()
 	w.RegisterActivity(realtimeEventActivities)
+
+	captchaActivities := captcha.NewActivities()
+	w.RegisterActivity(captchaActivities)
 }
 
 func loadTemplates() {

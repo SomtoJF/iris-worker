@@ -271,6 +271,23 @@ func executeJobApplication(
 			return newJobAppError(err, "Failed to take screenshot", "We couldn't continue the application because we failed to capture the page state")
 		}
 
+		// Deterministically detect + solve any captcha before the planner sees the page,
+		// so the planner never has to reason about captchas. Re-screenshot afterwards if
+		// a captcha was solved so tagged nodes reflect the cleared page.
+		solvedCaptcha, err := maybeSolveCaptcha(sessionCtx, workflowID, input.IdUser, input.IdJobApplication)
+		if err != nil {
+			return newJobAppError(err, "Failed to handle captcha", "We couldn't get past a security check on the page")
+		}
+		if solvedCaptcha {
+			err = workflow.ExecuteActivity(sessionCtx, "TakeScreenshot", browser.TakeScreenshotInput{
+				WorkflowID: workflowID,
+				FileName:   fmt.Sprintf("screenshot_%d_postcaptcha.png", iteration),
+			}).Get(sessionCtx, &screenshot)
+			if err != nil {
+				return newJobAppError(err, "Failed to take screenshot after captcha", "We couldn't continue the application because we failed to capture the page state")
+			}
+		}
+
 		requiredFields := extractRequiredFields(screenshot.TaggedNodes)
 
 		plannerRequest := PlannerRequest{
