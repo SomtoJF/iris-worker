@@ -10,12 +10,6 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-type indexedWebSearchResult struct {
-	Index  int
-	Output web.WebSearchOutput
-	ErrMsg string
-}
-
 var (
 	systemPromptTemplate *template.Template
 	userPromptTemplate   *template.Template
@@ -87,41 +81,43 @@ func userPromptHitsFromMerged(merged []mergedSearchHit) []UserPromptHit {
 	return out
 }
 
-// runConcurrentWebSearches runs one WebSearch activity per query using workflow.Go.
-// On activity failure, logs a warning and uses empty organic results for that index (resilient merge).
-func runConcurrentWebSearches(ctx workflow.Context, queries []string, location, dateCutoff string) []web.WebSearchOutput {
+// runBatchWebSearch runs all queries in one WebSearchBatch activity (Serper multi-query).
+// On activity failure, logs a warning and returns empty organic results per query.
+func runBatchWebSearch(ctx workflow.Context, queries []string, location, dateCutoff string) []web.WebSearchOutput {
 	logger := workflow.GetLogger(ctx)
 	n := len(queries)
 	if n == 0 {
 		return nil
 	}
 
-	ch := workflow.NewBufferedChannel(ctx, n)
-	for i, query := range queries {
-		i, query := i, query
-		workflow.Go(ctx, func(gctx workflow.Context) {
-			in := web.WebSearchInput{
-				Query:      query,
-				Location:   location,
-				DateCutoff: dateCutoff,
-			}
-			var out web.WebSearchOutput
-			err := workflow.ExecuteActivity(gctx, "WebSearch", in).Get(gctx, &out)
-			slot := indexedWebSearchResult{Index: i, Output: out}
-			if err != nil {
-				slot.ErrMsg = err.Error()
-				slot.Output = web.WebSearchOutput{Organic: []web.SerperOrganicResult{}}
-				logger.Warn("WebSearch activity failed", "index", i, "error", slot.ErrMsg)
-			}
-			ch.Send(gctx, slot)
-		})
+	empty := func() []web.WebSearchOutput {
+		out := make([]web.WebSearchOutput, n)
+		for i := range out {
+			out[i] = web.WebSearchOutput{Organic: []web.SerperOrganicResult{}}
+		}
+		return out
 	}
 
-	results := make([]web.WebSearchOutput, n)
-	for range queries {
-		var slot indexedWebSearchResult
-		ch.Receive(ctx, &slot)
-		results[slot.Index] = slot.Output
+	inputs := make([]web.WebSearchInput, n)
+	for i, query := range queries {
+		inputs[i] = web.WebSearchInput{
+			Query:      query,
+			Location:   location,
+			DateCutoff: dateCutoff,
+		}
 	}
-	return results
+
+	var batchOut web.WebSearchBatchOutput
+	err := workflow.ExecuteActivity(ctx, "WebSearchBatch", web.WebSearchBatchInput{Queries: inputs}).Get(ctx, &batchOut)
+	if err != nil {
+		logger.Warn("WebSearchBatch activity failed", "error", err)
+		return empty()
+	}
+	if len(batchOut.Results) != n {
+		logger.Warn("WebSearchBatch result count mismatch", "want", n, "got", len(batchOut.Results))
+		out := empty()
+		copy(out, batchOut.Results)
+		return out
+	}
+	return batchOut.Results
 }

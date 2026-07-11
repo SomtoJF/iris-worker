@@ -16,8 +16,14 @@ const (
 	jobSourceRemotefront = "remotefront.com"
 )
 
+// leverAggregatorSlugs are Lever "company" accounts that syndicate many employers'
+// roles (not the hiring company itself). Extend as more aggregators show up.
+var leverAggregatorSlugs = map[string]struct{}{
+	"jobgether": {},
+}
+
 // cleanGreenhouseResults keeps only Greenhouse job-board URLs matching
-// https://job-boards.greenhouse.io/<company_name>/jobs/<job_id> (no trailing segment stripping).
+// https://job-boards.greenhouse.io/<company_name>/jobs/<job_id>.
 func cleanGreenhouseResults(items []web.SerperOrganicResult) []web.SerperOrganicResult {
 	out := make([]web.SerperOrganicResult, 0, len(items))
 	for i := range items {
@@ -33,13 +39,15 @@ func cleanGreenhouseResults(items []web.SerperOrganicResult) []web.SerperOrganic
 }
 
 // cleanLeverResults normalizes Lever URLs to https://jobs.lever.co/<company>/<job_id>.
-// Some links end with an /apply segment; that trailing segment is dropped (same shape as Ashby after stripping the apply step).
-// Exactly two path segments must remain; otherwise the hit is dropped.
+// Drops /apply, query params, and known aggregator company boards (e.g. Jobgether).
 func cleanLeverResults(items []web.SerperOrganicResult) []web.SerperOrganicResult {
 	out := make([]web.SerperOrganicResult, 0, len(items))
 	for i := range items {
-		newLink, ok := normalizeLeverJobURL(items[i].Link)
+		newLink, company, ok := normalizeLeverJobURL(items[i].Link)
 		if !ok {
+			continue
+		}
+		if isLeverAggregator(company, items[i].Title) {
 			continue
 		}
 		row := items[i]
@@ -49,7 +57,7 @@ func cleanLeverResults(items []web.SerperOrganicResult) []web.SerperOrganicResul
 	return out
 }
 
-// cleanWellfoundResults keeps only URLs matching https://wellfound.com/jobs/<job_id> (no trailing segment stripping).
+// cleanWellfoundResults keeps only URLs matching https://wellfound.com/jobs/<job_id>.
 func cleanWellfoundResults(items []web.SerperOrganicResult) []web.SerperOrganicResult {
 	out := make([]web.SerperOrganicResult, 0, len(items))
 	for i := range items {
@@ -64,13 +72,24 @@ func cleanWellfoundResults(items []web.SerperOrganicResult) []web.SerperOrganicR
 	return out
 }
 
+// cleanWorkableResults normalizes to https://apply.workable.com/<company>/j/<job_id>,
+// stripping a trailing /apply segment and query params.
 func cleanWorkableResults(items []web.SerperOrganicResult) []web.SerperOrganicResult {
-	return items
+	out := make([]web.SerperOrganicResult, 0, len(items))
+	for i := range items {
+		newLink, ok := normalizeWorkableJobURL(items[i].Link)
+		if !ok {
+			continue
+		}
+		row := items[i]
+		row.Link = newLink
+		out = append(out, row)
+	}
+	return out
 }
 
 // cleanAshbyResults normalizes Ashby URLs to https://jobs.ashbyhq.com/<company>/<job_id>.
 // Application flows append a final "application" path segment and query params; that segment is dropped.
-// After cleanup, exactly two path segments must remain (company slug, job id); otherwise the hit is dropped.
 func cleanAshbyResults(items []web.SerperOrganicResult) []web.SerperOrganicResult {
 	out := make([]web.SerperOrganicResult, 0, len(items))
 	for i := range items {
@@ -108,6 +127,14 @@ func cleanResultsForJobSource(jobSource string, items []web.SerperOrganicResult)
 	}
 }
 
+func isLeverAggregator(companySlug, title string) bool {
+	if _, ok := leverAggregatorSlugs[strings.ToLower(strings.TrimSpace(companySlug))]; ok {
+		return true
+	}
+	// Titles are often "Jobgether - Role Name - Lever"
+	return strings.Contains(strings.ToLower(title), "jobgether")
+}
+
 func urlPathSegments(path string) []string {
 	trimmed := strings.Trim(path, "/")
 	if trimmed == "" {
@@ -116,20 +143,44 @@ func urlPathSegments(path string) []string {
 	parts := strings.Split(trimmed, "/")
 	segs := make([]string, 0, len(parts))
 	for _, p := range parts {
-		if p != "" {
-			segs = append(segs, p)
+		if p == "" {
+			continue
 		}
+		decoded, err := url.PathUnescape(p)
+		if err != nil {
+			decoded = p
+		}
+		segs = append(segs, decoded)
 	}
 	return segs
 }
 
+// parseJobURLHost parses raw and returns the URL plus lowercase host without www.
+func parseJobURLHost(raw string) (*url.URL, string, bool) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" {
+		return nil, "", false
+	}
+	host := strings.ToLower(strings.TrimPrefix(u.Host, "www."))
+	return u, host, true
+}
+
+// canonicalizeHTTPS builds https://host/seg/... with no query or fragment.
+// Path segments should already be decoded; url.URL re-encodes as needed.
+func canonicalizeHTTPS(host string, segs []string) string {
+	u := &url.URL{
+		Scheme: "https",
+		Host:   host,
+		Path:   "/" + strings.Join(segs, "/"),
+	}
+	return u.String()
+}
+
 func normalizeAshbyJobURL(raw string) (string, bool) {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme == "" || u.Host == "" {
+	u, host, ok := parseJobURLHost(raw)
+	if !ok {
 		return "", false
 	}
-
-	host := strings.ToLower(strings.TrimPrefix(u.Host, "www."))
 	if host != "jobs.ashbyhq.com" && host != "jobs.ashby.com" {
 		return "", false
 	}
@@ -149,24 +200,18 @@ func normalizeAshbyJobURL(raw string) (string, bool) {
 		return "", false
 	}
 
-	u.Path = "/" + strings.Join(segs, "/")
-	return u.String(), true
+	return canonicalizeHTTPS("jobs.ashbyhq.com", segs), true
 }
 
-func normalizeLeverJobURL(raw string) (string, bool) {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return "", false
-	}
-
-	host := strings.ToLower(strings.TrimPrefix(u.Host, "www."))
-	if host != "jobs.lever.co" {
-		return "", false
+func normalizeLeverJobURL(raw string) (canonical string, company string, ok bool) {
+	u, host, parsed := parseJobURLHost(raw)
+	if !parsed || host != "jobs.lever.co" {
+		return "", "", false
 	}
 
 	segs := urlPathSegments(u.Path)
 	if len(segs) == 0 {
-		return "", false
+		return "", "", false
 	}
 
 	last := segs[len(segs)-1]
@@ -175,21 +220,15 @@ func normalizeLeverJobURL(raw string) (string, bool) {
 	}
 
 	if len(segs) != 2 {
-		return "", false
+		return "", "", false
 	}
 
-	u.Path = "/" + strings.Join(segs, "/")
-	return u.String(), true
+	return canonicalizeHTTPS(jobSourceLever, segs), segs[0], true
 }
 
 func normalizeWellfoundJobURL(raw string) (string, bool) {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return "", false
-	}
-
-	host := strings.ToLower(strings.TrimPrefix(u.Host, "www."))
-	if host != jobSourceWellfound {
+	u, host, ok := parseJobURLHost(raw)
+	if !ok || host != jobSourceWellfound {
 		return "", false
 	}
 
@@ -204,18 +243,12 @@ func normalizeWellfoundJobURL(raw string) (string, bool) {
 		return "", false
 	}
 
-	u.Path = "/" + strings.Join(segs, "/")
-	return u.String(), true
+	return canonicalizeHTTPS(jobSourceWellfound, segs), true
 }
 
 func normalizeGreenhouseJobURL(raw string) (string, bool) {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return "", false
-	}
-
-	host := strings.ToLower(strings.TrimPrefix(u.Host, "www."))
-	if host != jobSourceGreenhouse {
+	u, host, ok := parseJobURLHost(raw)
+	if !ok || host != jobSourceGreenhouse {
 		return "", false
 	}
 
@@ -230,6 +263,36 @@ func normalizeGreenhouseJobURL(raw string) (string, bool) {
 		return "", false
 	}
 
-	u.Path = "/" + strings.Join(segs, "/")
-	return u.String(), true
+	return canonicalizeHTTPS(jobSourceGreenhouse, segs), true
+}
+
+// normalizeWorkableJobURL keeps https://apply.workable.com/<company>/j/<job_id>.
+// Trailing /apply (application step) is stripped.
+func normalizeWorkableJobURL(raw string) (string, bool) {
+	u, host, ok := parseJobURLHost(raw)
+	if !ok || host != jobSourceWorkable {
+		return "", false
+	}
+
+	segs := urlPathSegments(u.Path)
+	if len(segs) == 0 {
+		return "", false
+	}
+
+	if strings.EqualFold(segs[len(segs)-1], "apply") {
+		segs = segs[:len(segs)-1]
+	}
+
+	// /<company>/j/<job_id>
+	if len(segs) != 3 {
+		return "", false
+	}
+	if !strings.EqualFold(segs[1], "j") {
+		return "", false
+	}
+	if segs[0] == "" || segs[2] == "" {
+		return "", false
+	}
+
+	return canonicalizeHTTPS(jobSourceWorkable, segs), true
 }

@@ -13,13 +13,9 @@ You must output valid JSON that matches the schema described under &lt;expected_
 5. **title**: use the clearest job title from the hit (title field or snippet); do not invent a title not supported by the hit text.
 6. **company_name**: the organization hiring for this role. Prefer explicit names in the title or snippet; otherwise infer from the URL path (e.g. Greenhouse/Lever slug before /jobs/…), employer branding in the title, or Wellfound/Ashby-style company segment. Use the best short legal or brand name (e.g. "Acme Corp" not a full legal suffix unless that is all you have). If the employer truly cannot be determined, use an empty string.
 7. **date_posted** rules:
-   - If the input hit contains a date (the `<date>` field is non-empty or the snippet clearly contains a posted date), you **must** return `"date_posted"` for that job.
-   - Normalize `"date_posted"` to **YYYY-MM-DD**.
-   - Relative dates like `"12 hours ago"` / `"5 days ago"`: assume the current time is **12:00 noon** on `<today_date>` when converting to a calendar date.
-     - Example: if `<today_date>` is 2026-04-26 and the hit says `"12 hours ago"`, then `date_posted` is 2026-04-25.
-     - Example: `"5 days ago"` from 2026-04-26 → 2026-04-21.
-   - Absolute dates like `"12 Apr, 2026"` should be normalized to 2026-04-12.
-   - If no date is available for a hit, set `"date_posted"` to an empty string (`""`).
+   - The `<date>` field on each hit is already normalized to **YYYY-MM-DD** when known, or empty when unknown.
+   - Copy that value into `"date_posted"` for the corresponding job. Do not recompute or invent dates.
+   - If `<date>` is empty, set `"date_posted"` to an empty string (`""`).
 8. Respond with **JSON only**—no markdown fences, no commentary outside the JSON object.
 </instructions>
 

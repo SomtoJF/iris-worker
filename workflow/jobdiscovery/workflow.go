@@ -65,8 +65,9 @@ func JobDiscoveryWorkflow(ctx workflow.Context, input JobDiscoveryWorkflowInput)
 	}
 
 	queries := buildSearchQueries(input, jobSources)
-	searchOutputs := runConcurrentWebSearches(ctx, queries, input.Location, input.DateCutoff)
-	merged := mergeCleanedResults(jobSources, searchOutputs)
+	searchOutputs := runBatchWebSearch(ctx, queries, input.Location, input.DateCutoff)
+	now := workflow.Now(ctx)
+	merged := mergeCleanedResults(jobSources, searchOutputs, now)
 
 	systemPrompt, err := renderJobDiscoverySystemPrompt()
 	if err != nil {
@@ -75,22 +76,32 @@ func JobDiscoveryWorkflow(ctx workflow.Context, input JobDiscoveryWorkflowInput)
 
 	userPrompt, err := renderJobDiscoveryUserPrompt(UserPromptData{
 		Hits:      userPromptHitsFromMerged(merged),
-		TodayDate: time.Now().Format("2006-01-02"),
+		TodayDate: now.Format("2006-01-02"),
 	})
 	if err != nil {
 		return JobDiscoveryWorkflowOutput{}, fmt.Errorf("render job discovery user prompt: %w", err)
 	}
 
+	llmCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 4 * time.Minute,
+		RetryPolicy: &temporal.RetryPolicy{
+			InitialInterval:    time.Second,
+			BackoffCoefficient: 2.0,
+			MaximumInterval:    30 * time.Second,
+			MaximumAttempts:    3,
+		},
+	})
+
 	llmRequest := types.AIPIRequest{
 		SystemMessage:  systemPrompt,
 		UserMessage:    userPrompt,
-		Model:          "gemma-4-31b-it:free",
+		Model:          "deepseek/deepseek-v4-flash",
 		ResponseSchema: discoveredJobsResponseSchema(),
 		IdUser:         input.IdUser,
 	}
 
 	var llmResponse types.AIPIResponse
-	if err := workflow.ExecuteActivity(ctx, "CallLLM", llmRequest).Get(ctx, &llmResponse); err != nil {
+	if err := workflow.ExecuteActivity(llmCtx, "CallLLM", llmRequest).Get(ctx, &llmResponse); err != nil {
 		return JobDiscoveryWorkflowOutput{}, err
 	}
 
@@ -104,6 +115,7 @@ func JobDiscoveryWorkflow(ctx workflow.Context, input JobDiscoveryWorkflowInput)
 	if parsed.Jobs == nil {
 		parsed.Jobs = []DiscoveredJob{}
 	}
+	applyDeterministicDates(parsed.Jobs, merged)
 
 	return JobDiscoveryWorkflowOutput{Jobs: parsed.Jobs}, nil
 }
@@ -152,7 +164,7 @@ func buildSearchQueries(input JobDiscoveryWorkflowInput, jobSources []string) []
 	return out
 }
 
-func mergeCleanedResults(jobSources []string, outputs []web.WebSearchOutput) []mergedSearchHit {
+func mergeCleanedResults(jobSources []string, outputs []web.WebSearchOutput, now time.Time) []mergedSearchHit {
 	var out []mergedSearchHit
 	for i := range jobSources {
 		if i >= len(outputs) {
@@ -165,7 +177,7 @@ func mergeCleanedResults(jobSources []string, outputs []web.WebSearchOutput) []m
 				Link:    r.Link,
 				Snippet: r.Snippet,
 				Source:  jobSources[i],
-				Date:    r.Date,
+				Date:    normalizeSerperDate(r.Date, now),
 			})
 		}
 	}
@@ -196,7 +208,7 @@ func discoveredJobsResponseSchema() map[string]interface{} {
 						},
 						"date_posted": map[string]interface{}{
 							"type":        "string",
-							"description": "Date the job was posted in YYYY-MM-DD format",
+							"description": "Copy the hit <date> field (already YYYY-MM-DD or empty)",
 						},
 					},
 					"required": []string{"title", "url", "company_name", "date_posted"},

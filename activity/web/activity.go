@@ -250,6 +250,16 @@ type serperGoogleSearchResponse struct {
 	Organic []SerperOrganicResult `json:"organic"`
 }
 
+// WebSearchBatchInput sends multiple Google searches in one Serper request (JSON array body).
+type WebSearchBatchInput struct {
+	Queries []WebSearchInput `json:"queries"`
+}
+
+// WebSearchBatchOutput holds one WebSearchOutput per input query, in the same order.
+type WebSearchBatchOutput struct {
+	Results []WebSearchOutput `json:"results"`
+}
+
 func (a *Activity) WebSearch(ctx context.Context, input WebSearchInput) (WebSearchOutput, error) {
 	apiKey := os.Getenv("SERPER_API_KEY")
 	if apiKey == "" {
@@ -261,31 +271,9 @@ func (a *Activity) WebSearch(ctx context.Context, input WebSearchInput) (WebSear
 		return WebSearchOutput{}, err
 	}
 
-	payload, err := json.Marshal(reqBody)
+	respBody, err := postSerperSearch(ctx, apiKey, reqBody)
 	if err != nil {
-		return WebSearchOutput{}, fmt.Errorf("marshal serper search request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://google.serper.dev/search", bytes.NewReader(payload))
-	if err != nil {
-		return WebSearchOutput{}, fmt.Errorf("create serper search request: %w", err)
-	}
-	req.Header.Set("X-API-KEY", apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return WebSearchOutput{}, fmt.Errorf("serper search request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return WebSearchOutput{}, fmt.Errorf("read serper search response: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return WebSearchOutput{}, fmt.Errorf("serper search returned status %d: %s", resp.StatusCode, string(respBody))
+		return WebSearchOutput{}, err
 	}
 
 	var parsed serperGoogleSearchResponse
@@ -301,6 +289,83 @@ func (a *Activity) WebSearch(ctx context.Context, input WebSearchInput) (WebSear
 		Organic: parsed.Organic,
 		RawJSON: string(respBody),
 	}, nil
+}
+
+// WebSearchBatch runs multiple Serper Google searches in a single HTTP call.
+// Serper accepts a JSON array of {q, gl, tbs} objects and returns a matching array of results.
+func (a *Activity) WebSearchBatch(ctx context.Context, input WebSearchBatchInput) (WebSearchBatchOutput, error) {
+	if len(input.Queries) == 0 {
+		return WebSearchBatchOutput{Results: []WebSearchOutput{}}, nil
+	}
+
+	apiKey := os.Getenv("SERPER_API_KEY")
+	if apiKey == "" {
+		return WebSearchBatchOutput{}, fmt.Errorf("SERPER_API_KEY env var not set")
+	}
+
+	reqs := make([]serperGoogleSearchRequest, 0, len(input.Queries))
+	for i, q := range input.Queries {
+		reqBody, err := buildSerperGoogleSearchRequest(q)
+		if err != nil {
+			return WebSearchBatchOutput{}, fmt.Errorf("query[%d]: %w", i, err)
+		}
+		reqs = append(reqs, reqBody)
+	}
+
+	respBody, err := postSerperSearch(ctx, apiKey, reqs)
+	if err != nil {
+		return WebSearchBatchOutput{}, err
+	}
+
+	var parsed []serperGoogleSearchResponse
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return WebSearchBatchOutput{}, fmt.Errorf("unmarshal serper batch search response: %w", err)
+	}
+	if len(parsed) != len(input.Queries) {
+		return WebSearchBatchOutput{}, fmt.Errorf("serper batch returned %d results for %d queries", len(parsed), len(input.Queries))
+	}
+
+	results := make([]WebSearchOutput, len(parsed))
+	for i, p := range parsed {
+		organic := p.Organic
+		if organic == nil {
+			organic = []SerperOrganicResult{}
+		}
+		results[i] = WebSearchOutput{Organic: organic}
+	}
+
+	return WebSearchBatchOutput{Results: results}, nil
+}
+
+func postSerperSearch(ctx context.Context, apiKey string, body any) ([]byte, error) {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal serper search request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://google.serper.dev/search", bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("create serper search request: %w", err)
+	}
+	req.Header.Set("X-API-KEY", apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("serper search request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read serper search response: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("serper search returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return respBody, nil
 }
 
 func buildSerperGoogleSearchRequest(input WebSearchInput) (serperGoogleSearchRequest, error) {
