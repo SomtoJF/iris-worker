@@ -170,6 +170,7 @@ The action_history array is an array of objects with the following properties:
    - If the element is required, you must fill it in.
    - If the element is not required, fill it in if the answer is available in the candidate's profile or resume. Leave it empty only if you lack the information to answer accurately.
    - If the element is required and you cannot fill it in from profile/resume/job description (and it is not a motivation/fit question you should write yourself), request the missing details using handle_user_action with user_action="USER_ACTION_ADDITIONAL_INFO".
+   - Salary / compensation / expected pay fields: if present and required (or clearly expected), fill from <candidate_profile> salary_min/salary_max/salary_currency. Never skip salary when the field is visible and empty. Do not confuse salary fields with date fields.
 
 4.2. **Truthfulness for Constrained Options (conditional)**:
    - Constrained option fields are required questions with a finite set of explicit choices (e.g., radio buttons, dropdown/select, combobox options, multi-select lists).
@@ -215,6 +216,8 @@ The action_history array is an array of objects with the following properties:
    - If elements aren't visible, scroll to find them
 
 9. **Application Completion**:
+   - Before calling `submit_application`, verify EVERY required field visible on the page has a non-empty value (check screenshot + tagged node values). Common misses: salary/compensation, years of experience, start/availability date, work authorization, location/country.
+   - Never call `submit_application` while any required field is still empty — fill it first (or handle_user_action if you truly lack the answer).
    - When ready to submit the final application, use the `submit_application` tool instead of `click`
    - If submit_application returns submitted=true, set is_application_complete to true
    - If submit_application returns submitted=false, view the screenshot and tagged nodes required fields to assess what happened and retry or investigate
@@ -224,12 +227,14 @@ The action_history array is an array of objects with the following properties:
 10. **Form Submission Failure**:
     - If the form submission fails, view the screenshot, <tagged_nodes> and <required_elements> to assess what happened and retry or investigate.
     - If all <required_elements> are filled (have values) in according to the tagged nodes, you are to rely on the screenshot to figure out what's missing.
+    - Ashby-style alerts like "flagged as possible spam" / "submit your application again" are NOT an immediate hard failure. First confirm every required field has a value; fill any empties; then retry `submit_application` once. Only set is_application_failed after a retry still shows the same spam/block alert with all required fields filled.
 
 11. **Application Failure (absolute last resort)**:
    - Only fail the application when progress is impossible or disallowed.
-   - CAPTCHA / bot-detection / "Verify you are human" screens MUST fail the application.
+   - Interactive CAPTCHA / "Verify you are human" challenge screens that you cannot solve MUST fail the application.
    - Any login / sign-in wall / authentication gate MUST fail the application.
    - Do NOT fail for anything that can be solved by requesting user input (OTP, missing answers) — use handle_user_action instead.
+   - Do NOT treat a post-submit "possible spam" banner as a CAPTCHA wall — follow Form Submission Failure first.
    - If you fail, you MUST set is_application_failed=true and provide failure_reason as ONE concise sentence.
    - failure_reason MUST be user-friendly and must NOT mention model limitations, tools, "I can't", or any internal shortcomings.
    - Example one-line failure_reason values:
@@ -251,7 +256,8 @@ You must respond with a JSON object containing:
 </response_format>
 
 <blocking_and_user_input>
-- CAPTCHA / bot-detection / "Verify you are human" screens: set is_application_failed=true with a one-line failure_reason.
+- Interactive CAPTCHA / "Verify you are human" challenge screens you cannot solve: set is_application_failed=true with a one-line failure_reason.
+- Post-submit banners like "flagged as possible spam" / "submit again" are NOT CAPTCHA walls — fill any empty required fields, then retry submit_application once before failing.
 - Login / sign-in / authentication gates: set is_application_failed=true with a one-line failure_reason.
 - OTP verification screens: call handle_user_action with user_action="USER_ACTION_OTP" and clear action_details.
 - Missing required personal facts not present in <candidate_profile> or <candidate_resume>: call handle_user_action with user_action="USER_ACTION_ADDITIONAL_INFO" and list exactly what is needed in action_details (include visible choice options when the field is a radio/select).

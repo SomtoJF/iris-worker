@@ -228,7 +228,7 @@ func executeJobApplication(
 		}).Get(newCtx, nil)
 	}()
 
-	retrieved, err := retrieveJobDetails(sessionCtx, input.Url, input.IdUser, input.IdJobApplication)
+	retrieved, err := retrieveJobDetails(sessionCtx, workflowID, input.Url, input.IdUser, input.IdJobApplication)
 	if err != nil {
 		return newJobAppError(err, "Failed to retrieve job details", "We couldn't retrieve the job details")
 	}
@@ -303,6 +303,7 @@ func executeJobApplication(
 			UserResumePath:          resumePath,
 			UserProfileJSON:         userProfileJSON,
 			RequiredFields:          requiredFields,
+			CurrentDate:             workflow.Now(cancelCtx).Format("2006-01-02"),
 		}
 
 		plannerResponse, err := planNextAction(cancelCtx, plannerRequest)

@@ -126,10 +126,11 @@ func detectCaptcha(sessionCtx workflow.Context, workflowID string) (browseractiv
 func solveWithCapSolver(ctx workflow.Context, detected browseractivity.DetectCaptchaOutput) (string, error) {
 	var out captcha.SolveWithCapSolverOutput
 	err := workflow.ExecuteActivity(ctx, "SolveWithCapSolver", captcha.SolveWithCapSolverInput{
-		Type:    detected.Type,
-		SiteKey: detected.SiteKey,
-		PageURL: detected.PageURL,
-		Action:  detected.Action,
+		Type:      detected.Type,
+		SiteKey:   detected.SiteKey,
+		PageURL:   detected.PageURL,
+		Action:    detected.Action,
+		Invisible: detected.Invisible,
 	}).Get(ctx, &out)
 	return out.Token, err
 }

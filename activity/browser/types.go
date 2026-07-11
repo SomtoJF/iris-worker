@@ -22,6 +22,10 @@ type GetBase64ScreenshotInput struct {
 	Path string `json:"path"`
 }
 
+type GetPageTextInput struct {
+	WorkflowID string `json:"workflow_id"`
+}
+
 type ClickInput struct {
 	WorkflowID   string `json:"workflow_id"`
 	ElementIndex int    `json:"element_index"`

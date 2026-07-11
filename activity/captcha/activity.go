@@ -65,6 +65,9 @@ func buildTask(input SolveWithCapSolverInput) (map[string]interface{}, error) {
 	switch input.Type {
 	case browser.CaptchaTypeRecaptchaV2:
 		task["type"] = "ReCaptchaV2TaskProxyLess"
+		if input.Invisible {
+			task["isInvisible"] = true
+		}
 	case browser.CaptchaTypeRecaptchaV3:
 		task["type"] = "ReCaptchaV3TaskProxyLess"
 		action := input.Action

@@ -161,3 +161,39 @@ Workflow tabs appear when `OpenWebpage` runs and disappear when the session clos
 - Use `make start-worker` for normal local headed debugging without a fixed CDP port.
 - Do not use `start-worker-observe` in production/Docker; that path stays headless without an exposed debug port.
 - Multiple CDP clients can attach to the same Chromium; go-rod keeps control while MCP observes.
+
+## Iterative debugging with Temporal CLI + browser
+
+When fixing job-application failures, run a tight observe → diagnose → fix → re-run loop until the workflow completes. Prefer the project skill `.cursor/skills/debug-job-application/SKILL.md` for the full checklist.
+
+### Tools
+
+1. **Temporal CLI** (`temporal`) — workflow status, pending activities, event history, activity inputs/outputs/failures.
+2. **Chrome DevTools MCP** (via `make start-worker-observe`) — live page state while the agent runs.
+
+### Typical loop
+
+```bash
+# 1. Observe worker (CDP :9222)
+make start-worker-observe
+
+# 2. Start a uniquely-id'd run
+WF_ID="job-app-debug-$(date +%s)"
+temporal workflow start \
+  --address localhost:7233 \
+  --namespace default \
+  --task-queue job-application \
+  --type JobApplicationWorkflow \
+  --workflow-id "$WF_ID" \
+  --input '{"url":"...","id_user":1,"id_resume":1,"id_job_application":19,"application_external_id":"..."}'
+
+# 3. Watch status / failures
+temporal workflow describe --address localhost:7233 --workflow-id "$WF_ID"
+temporal workflow show --address localhost:7233 --workflow-id "$WF_ID" --follow
+temporal workflow show --address localhost:7233 --workflow-id "$WF_ID" --output json > /tmp/wf-history.json
+
+# 4. On failure: inspect ActivityTaskScheduled input + Failed message, fix code, cancel if needed, start a new WF_ID
+temporal workflow cancel --address localhost:7233 --workflow-id "$WF_ID"
+```
+
+Use history JSON to correlate planner `element_index` values with `TakeScreenshot` tagged nodes and any `Type`/`Click`/`TypeMultiple` errors. Do not assume tagged-node slice position equals the painted index.

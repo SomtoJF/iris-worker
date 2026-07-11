@@ -68,6 +68,7 @@ type PlannerRequest struct {
 	TaggedFileInputElements []browserfactory.SerializableTaggedFileInputNode `json:"tagged_file_input_elements"`
 	ToolCallHistory         []ToolCallResult                                 `json:"tool_call_history"`
 	UserProfileJSON         string                                           `json:"user_profile"`
+	CurrentDate             string                                           `json:"current_date"`
 }
 
 type ToolItem struct {
@@ -332,7 +333,7 @@ func planNextAction(ctx workflow.Context, input PlannerRequest) (PlannerResponse
 		SystemMessage:    systemPrompt,
 		UserMessage:      userPrompt,
 		ImageUrl:         &screenshotBase64,
-		Model:            "x-ai/grok-4.3",
+		Model:            "x-ai/grok-4.5",
 		ResponseSchema:   getPlannerResponseSchema(),
 		Temperature:      &temperaturePtr,
 		IdUser:           input.IdUser,
@@ -475,26 +476,35 @@ type JobDetails struct {
 	IsValidJobPosting bool   `json:"is_valid_job_posting"`
 }
 
-func retrieveJobDetails(ctx workflow.Context, url string, idUser uint, idJobApplication uint) (JobDetails, error) {
-	// Scrape webpage with advanced mode (Serper)
-	var scrapeOutput map[string]interface{}
-	if err := workflow.ExecuteActivity(ctx, "ScrapeWebPage", map[string]interface{}{
-		"url":                url,
-		"advanced":           true,
-		"id_user":            idUser,
-		"id_job_application": idJobApplication,
-	}).Get(ctx, &scrapeOutput); err != nil {
-		return JobDetails{}, err
+func retrieveJobDetails(ctx workflow.Context, workflowID string, url string, idUser uint, idJobApplication uint) (JobDetails, error) {
+	// Prefer the already-open browser page (JS-rendered). Serper/Colly often fail
+	// on SPAs like Ashby and return empty shells.
+	var pageText string
+	if err := workflow.ExecuteActivity(ctx, "GetPageText", browseractivity.GetPageTextInput{
+		WorkflowID: workflowID,
+	}).Get(ctx, &pageText); err != nil {
+		return JobDetails{}, fmt.Errorf("get page text: %w", err)
+	}
+	if strings.TrimSpace(pageText) == "" {
+		// Fallback to Serper/Colly scrape if the page text is empty.
+		var scrapeOutput map[string]interface{}
+		if err := workflow.ExecuteActivity(ctx, "ScrapeWebPage", map[string]interface{}{
+			"url":                url,
+			"advanced":           true,
+			"id_user":            idUser,
+			"id_job_application": idJobApplication,
+		}).Get(ctx, &scrapeOutput); err != nil {
+			return JobDetails{}, err
+		}
+		scrapedData, ok := scrapeOutput["data"].(string)
+		if !ok || strings.TrimSpace(scrapedData) == "" {
+			return JobDetails{}, fmt.Errorf("failed to get scraped data")
+		}
+		pageText = scrapedData
 	}
 
-	scrapedData, ok := scrapeOutput["data"].(string)
-	if !ok {
-		return JobDetails{}, fmt.Errorf("failed to get scraped data")
-	}
-
-	// Build LLM request to extract job details
 	systemPrompt := "Extract the job title, company name, and job description from the provided scraped webpage content. Return the data in JSON format. Most job descriptions have a 'Who we are' or 'About us' or 'Company Description' section that contains the company's details. This is where you should look for the company name. If this page doesn't include the job description, It is invalid and you should set is_valid_job_posting to false. For invalid job postings, return an empty string for the job description, job title, and company name."
-	userPrompt := fmt.Sprintf("Scraped content:\n\n%s", scrapedData)
+	userPrompt := fmt.Sprintf("Scraped content:\n\n%s", pageText)
 
 	llmRequest := types.AIPIRequest{
 		SystemMessage:    systemPrompt,
@@ -514,10 +524,18 @@ func retrieveJobDetails(ctx workflow.Context, url string, idUser uint, idJobAppl
 
 	var jobDetails JobDetails
 	if err := json.Unmarshal([]byte(jsonPayload), &jobDetails); err != nil {
-		return JobDetails{}, err
+		return JobDetails{}, fmt.Errorf("unmarshal job details from %q: %w", truncateForErr(jsonPayload, 120), err)
 	}
 
 	return jobDetails, nil
+}
+
+func truncateForErr(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 // stripLLMJSONFences removes markdown code fences (e.g. ```json ... ```) so the

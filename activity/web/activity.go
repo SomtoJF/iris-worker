@@ -59,6 +59,10 @@ func (a *Activity) ScrapeWebPage(ctx context.Context, input ScrapeWebPageInput) 
 		var err error
 		if input.Advanced {
 			result, err = scrapeWithSerper(input.Url)
+			if err != nil {
+				log.Printf("serper scrape failed, falling back to colly: %v", err)
+				result, err = scrapeWithColly(input.Url, parsedURL.Host)
+			}
 		} else {
 			result, err = scrapeWithColly(input.Url, parsedURL.Host)
 		}

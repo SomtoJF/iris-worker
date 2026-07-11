@@ -198,35 +198,38 @@ func tagAccessibilityNodes(page *rod.Page, accessibilityTree []*proto.Accessibil
 
 	var taggedNodes []*TaggedAccessibilityNode
 
-	// Inject tagging script for each focusable element
-	for i, node := range focusableNodes {
+	// Inject tagging script for each focusable element.
+	// Index is the painted label id (contiguous among nodes that have bounds),
+	// not the focusableNodes slice position — nodes without bounds are skipped.
+	for _, node := range focusableNodes {
 		bounds := getNodeBounds(page, node)
-		if bounds != nil {
-			page.MustEval(`(x, y, w, h, i) => {
-				const tag = document.createElement('div');
-				tag.className = 'agent-tag';
-				tag.innerText = i;
-				tag.style = `+"`"+`
-					position: fixed;
-					left: ${x}px;
-					top: ${y}px;
-					background: #ff0000;
-					color: white;
-					padding: 2px 4px;
-					font-size: 10px;
-					font-weight: bold;
-					border-radius: 3px;
-					z-index: 1000000;
-					pointer-events: none;
-				`+"`"+`;
-				document.body.appendChild(tag);
-			}`, bounds.X, bounds.Y, bounds.Width, bounds.Height, i)
-		} else {
+		if bounds == nil {
 			continue
 		}
 
+		index := len(taggedNodes)
+		page.MustEval(`(x, y, w, h, i) => {
+			const tag = document.createElement('div');
+			tag.className = 'agent-tag';
+			tag.innerText = i;
+			tag.style = `+"`"+`
+				position: fixed;
+				left: ${x}px;
+				top: ${y}px;
+				background: #ff0000;
+				color: white;
+				padding: 2px 4px;
+				font-size: 10px;
+				font-weight: bold;
+				border-radius: 3px;
+				z-index: 1000000;
+				pointer-events: none;
+			`+"`"+`;
+			document.body.appendChild(tag);
+		}`, bounds.X, bounds.Y, bounds.Width, bounds.Height, index)
+
 		element := getElementFromNode(page, node)
-		description := getDescriptionFromNode(node, i, element)
+		description := getDescriptionFromNode(node, index, element)
 		role := getNodeRole(node, element)
 		value := getNodeValue(node, element)
 
@@ -258,7 +261,7 @@ func tagAccessibilityNodes(page *rod.Page, accessibilityTree []*proto.Accessibil
 			Node:        node,
 			Element:     element,
 			Bounds:      bounds,
-			Index:       i,
+			Index:       index,
 			Description: description,
 			Role:        role,
 			Value:       &value,
