@@ -57,7 +57,7 @@ func JobDiscoveryWorkflow(ctx workflow.Context, input JobDiscoveryWorkflowInput)
 
 	jobSources := []string{
 		jobSourceGreenhouse,
-		jobSourceAshby,
+		// jobSourceAshby,
 		jobSourceLever,
 		jobSourceWellfound,
 		jobSourceWorkable,
