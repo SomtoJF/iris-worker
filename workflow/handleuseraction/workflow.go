@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"text/template"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/SomtoJF/iris-worker/activity/realtimeevent"
 	"github.com/SomtoJF/iris-worker/activity/sqldb"
 	"github.com/SomtoJF/iris-worker/aipi/types"
+	"github.com/SomtoJF/iris-worker/browserfactory"
 	"github.com/SomtoJF/iris-worker/helper"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
@@ -75,7 +77,7 @@ func HandleUserActionWorkflow(ctx workflow.Context, input HandleUserActionWorkfl
 	}
 
 	// Call LLM to build the user action layout and form description from the screenshot
-	formDescription, layout, err := buildUserActionLayout(ctx, screenshot.Path, input.UserAction, input.ActionDetails, jobApplication.JobTitle, jobApplication.CompanyName, input.IdUser, input.IdJobApplication)
+	formDescription, layout, err := buildUserActionLayout(ctx, screenshot, input.UserAction, input.ActionDetails, jobApplication.JobTitle, jobApplication.CompanyName, input.IdUser, input.IdJobApplication)
 	if err != nil {
 		logger.Error("Failed to build user action layout", "error", err)
 		return nil, err
@@ -161,7 +163,7 @@ func takeScreenshot(ctx workflow.Context, workflowID string) (browser.TakeScreen
 	return output, err
 }
 
-func buildUserActionLayout(ctx workflow.Context, screenshotPath string, userAction string, actionDetails string, jobTitle string, companyName string, idUser uint, idJobApplication uint) (string, sqldb.UserActionLayout, error) {
+func buildUserActionLayout(ctx workflow.Context, screenshot browser.TakeScreenshotOutput, userAction string, actionDetails string, jobTitle string, companyName string, idUser uint, idJobApplication uint) (string, sqldb.UserActionLayout, error) {
 	promptData := struct {
 		UserAction    string
 		ActionDetails string
@@ -179,16 +181,61 @@ func buildUserActionLayout(ctx workflow.Context, screenshotPath string, userActi
 		return "", nil, fmt.Errorf("render system prompt: %w", err)
 	}
 
-	screenshotBase64, err := getBase64Screenshot(screenshotPath)
+	screenshotBase64, err := getBase64Screenshot(screenshot.Path)
 	if err != nil {
 		return "", nil, fmt.Errorf("encode screenshot: %w", err)
 	}
 
-	var temperaturePtr float64 = 0.3
+	userMessage := buildUserActionUserMessage(actionDetails, screenshot.TaggedNodes)
+
+	formDescription, layout, err := callUserActionLayoutLLM(ctx, buf.String(), userMessage, screenshotBase64, idUser, idJobApplication)
+	if err != nil {
+		return "", nil, err
+	}
+
+	if missing := choiceFieldsMissingOptions(layout); len(missing) > 0 {
+		retryMsg := userMessage + "\n\nCRITICAL RETRY: Your previous layout omitted options for these choice fields: " +
+			strings.Join(missing, "; ") +
+			". Re-read the screenshot and tagged elements. For every select/radio/checkbox/combobox you MUST return a non-empty options array with every visible choice label. Do not use free-text input for those fields."
+		formDescription, layout, err = callUserActionLayoutLLM(ctx, buf.String(), retryMsg, screenshotBase64, idUser, idJobApplication)
+		if err != nil {
+			return "", nil, err
+		}
+		if missing = choiceFieldsMissingOptions(layout); len(missing) > 0 {
+			return "", nil, fmt.Errorf("user action layout missing options for: %s", strings.Join(missing, "; "))
+		}
+	}
+
+	return formDescription, layout, nil
+}
+
+func buildUserActionUserMessage(actionDetails string, taggedNodes []browserfactory.SerializableTaggedNode) string {
+	var b strings.Builder
+	b.WriteString("Analyze the screenshot and return the form description and layout for this user action.\n")
+	b.WriteString("Action details: ")
+	b.WriteString(actionDetails)
+	b.WriteString("\n")
+	if len(taggedNodes) == 0 {
+		b.WriteString("No tagged interactive elements were extracted; rely on the screenshot.")
+		return b.String()
+	}
+	b.WriteString("Tagged interactive elements on the page (use these to recover option labels for radios/selects/checkboxes):\n")
+	for _, n := range taggedNodes {
+		b.WriteString(fmt.Sprintf("- [%d] role=%q desc=%q", n.Index, n.Role, n.Description))
+		if n.Value != nil && *n.Value != "" {
+			b.WriteString(fmt.Sprintf(" value=%q", *n.Value))
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func callUserActionLayoutLLM(ctx workflow.Context, systemMessage, userMessage, screenshotBase64 string, idUser uint, idJobApplication uint) (string, sqldb.UserActionLayout, error) {
+	var temperaturePtr float64 = 0.2
 
 	llmRequest := types.AIPIRequest{
-		SystemMessage:    buf.String(),
-		UserMessage:      "Analyze the screenshot and return the form description and layout.",
+		SystemMessage:    systemMessage,
+		UserMessage:      userMessage,
 		ImageUrl:         &screenshotBase64,
 		Model:            "x-ai/grok-4.3",
 		ResponseSchema:   getUserActionResponseSchema(),
@@ -211,6 +258,25 @@ func buildUserActionLayout(ctx workflow.Context, screenshotPath string, userActi
 	}
 
 	return response.FormDescription, response.Layout, nil
+}
+
+// choiceFieldsMissingOptions returns field names for select/radio/checkbox/combobox
+// entries that have no options — those layouts are unanswerable in the UI.
+func choiceFieldsMissingOptions(layout sqldb.UserActionLayout) []string {
+	var missing []string
+	for _, item := range layout {
+		comp := ""
+		if item.Component != nil {
+			comp = strings.ToLower(strings.TrimSpace(*item.Component))
+		}
+		switch comp {
+		case "select", "radio", "checkbox", "combobox":
+			if item.Options == nil || len(*item.Options) == 0 {
+				missing = append(missing, item.FieldName)
+			}
+		}
+	}
+	return missing
 }
 
 func createUserAction(ctx workflow.Context, input sqldb.CreateUserActionInput) (sqldb.UserAction, error) {
@@ -324,10 +390,10 @@ func getUserActionResponseSchema() map[string]interface{} {
 						},
 						"options": map[string]interface{}{
 							"anyOf": []map[string]interface{}{
-								{"type": "array", "items": map[string]interface{}{"type": "string"}},
+								{"type": "array", "items": map[string]interface{}{"type": "string"}, "minItems": 1},
 								{"type": "null"},
 							},
-							"description": "Available options for select/radio/checkbox fields",
+							"description": "REQUIRED non-empty array of every visible choice when component is select, radio, checkbox, or combobox. Null only for free-text input/textarea.",
 						},
 					},
 					"required": []string{"field_name", "description", "type", "component", "options"},
