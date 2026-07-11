@@ -352,36 +352,6 @@ func planNextAction(ctx workflow.Context, input PlannerRequest) (PlannerResponse
 	return plannerResponse, nil
 }
 
-// maybeSolveCaptcha detects a captcha on the current page and, if present, runs the
-// self-contained SolveCaptchaWorkflow child to clear it. Returns true when a captcha
-// was present (and thus solving was attempted). The planner never sees captcha state.
-func maybeSolveCaptcha(ctx workflow.Context, workflowID string, userID uint, idJobApplication uint) (bool, error) {
-	var detected browseractivity.DetectCaptchaOutput
-	if err := workflow.ExecuteActivity(ctx, "DetectCaptcha", browseractivity.DetectCaptchaInput{
-		WorkflowID: workflowID,
-	}).Get(ctx, &detected); err != nil {
-		return false, err
-	}
-
-	if detected.Type == browseractivity.CaptchaTypeNone {
-		return false, nil
-	}
-
-	childCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
-		ParentClosePolicy: enumspb.PARENT_CLOSE_POLICY_REQUEST_CANCEL,
-	})
-	var result map[string]interface{}
-	if err := workflow.ExecuteChildWorkflow(childCtx, "SolveCaptchaWorkflow", map[string]interface{}{
-		"workflow_id":        workflowID,
-		"id_user":            userID,
-		"id_job_application": idJobApplication,
-	}).Get(ctx, &result); err != nil {
-		return false, err
-	}
-
-	return true, nil
-}
-
 func executeToolCall(ctx workflow.Context, workflowID string, userID uint, idJobApplication uint, toolCall ToolCall) ToolCallResult {
 	toolItem, exists := toolItemMap[toolCall.Name]
 	if !exists {
