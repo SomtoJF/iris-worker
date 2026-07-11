@@ -11,6 +11,15 @@ import (
 	"github.com/go-rod/rod/lib/proto"
 )
 
+// captchaResponseSelectors are the hidden fields CapSolver tokens are written into.
+var captchaResponseSelectors = []string{
+	`textarea[name="g-recaptcha-response"]`,
+	`textarea#g-recaptcha-response`,
+	`input[name="g-recaptcha-response"]`,
+	`input[name="cf-turnstile-response"]`,
+	`input[name="cf_turnstile_response"]`,
+}
+
 // DetectCaptcha inspects the live page for a captcha and returns its type + args.
 // Detection is deterministic (DOM inspection via go-rod, no LLM):
 //   - Turnstile: a .cf-turnstile[data-sitekey] element OR an iframe src containing
@@ -18,6 +27,10 @@ import (
 //   - reCAPTCHA v2: a .g-recaptcha[data-sitekey] element OR an iframe src containing
 //     "recaptcha/api2/anchor". Sitekey from data-sitekey or the iframe "k" param.
 //   - reCAPTCHA v3: a script src "recaptcha/api.js?render=SITEKEY" and no anchor iframe.
+//
+// If a non-empty token is already present in a captcha response field (e.g. after a
+// successful InjectCaptchaToken), returns type=none so the agent loop does not re-solve.
+// This matters especially for v3: the render= script stays on the page forever.
 func (a *Activity) DetectCaptcha(ctx context.Context, input DetectCaptchaInput) (DetectCaptchaOutput, error) {
 	a.mu.Lock()
 	page, exists := a.activeSessions[input.WorkflowID]
@@ -25,6 +38,10 @@ func (a *Activity) DetectCaptcha(ctx context.Context, input DetectCaptchaInput) 
 
 	if !exists {
 		return DetectCaptchaOutput{}, fmt.Errorf("no active page for workflow %s", input.WorkflowID)
+	}
+
+	if hasSolvedCaptchaToken(page) {
+		return DetectCaptchaOutput{Type: CaptchaTypeNone}, nil
 	}
 
 	iframeSrcs, err := elementSrcs(page, "iframe")
@@ -45,6 +62,26 @@ func (a *Activity) DetectCaptcha(ctx context.Context, input DetectCaptchaInput) 
 		out.PageURL = page.MustInfo().URL
 	}
 	return out, nil
+}
+
+// hasSolvedCaptchaToken reports whether any captcha response field already holds a token.
+func hasSolvedCaptchaToken(page *rod.Page) bool {
+	for _, selector := range captchaResponseSelectors {
+		els, err := page.Elements(selector)
+		if err != nil {
+			continue
+		}
+		for _, el := range els {
+			obj, err := el.Eval(`() => (this.value || this.innerHTML || "").trim()`)
+			if err != nil || obj == nil {
+				continue
+			}
+			if obj.Value.Str() != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func detectTurnstile(page *rod.Page, iframeSrcs []string, out *DetectCaptchaOutput) bool {
@@ -121,6 +158,10 @@ func detectRecaptchaV3(page *rod.Page, out *DetectCaptchaOutput) bool {
 	return false
 }
 
+// injectCaptchaTimeout bounds DOM/JS work so a busy page or circular grecaptcha
+// object graph cannot pin the activity until StartToClose.
+const injectCaptchaTimeout = 15 * time.Second
+
 // InjectCaptchaToken writes the solved token into the page's hidden response field and,
 // for reCAPTCHA, fires the widget callback where possible.
 func (a *Activity) InjectCaptchaToken(ctx context.Context, input InjectCaptchaTokenInput) (InjectCaptchaTokenOutput, error) {
@@ -131,6 +172,10 @@ func (a *Activity) InjectCaptchaToken(ctx context.Context, input InjectCaptchaTo
 	if !exists {
 		return InjectCaptchaTokenOutput{}, fmt.Errorf("no active page for workflow %s", input.WorkflowID)
 	}
+
+	// Bound every rod call; do not MustWaitIdle — captcha pages keep network/JS busy
+	// (recaptcha iframes, analytics) so requestIdleCallback often never fires.
+	page = page.Timeout(injectCaptchaTimeout)
 
 	var callbackFired bool
 	var err error
@@ -143,7 +188,6 @@ func (a *Activity) InjectCaptchaToken(ctx context.Context, input InjectCaptchaTo
 		return InjectCaptchaTokenOutput{}, fmt.Errorf("failed to inject captcha token: %w", err)
 	}
 
-	page.MustWaitIdle()
 	return InjectCaptchaTokenOutput{CallbackFired: callbackFired}, nil
 }
 
@@ -158,7 +202,7 @@ func injectRecaptchaToken(page *rod.Page, token string) (bool, error) {
 		`textarea#g-recaptcha-response`,
 		`input[name="g-recaptcha-response"]`,
 	}
-	if err := setValueAndShow(page, token, selectors...); err != nil {
+	if err := ensureCaptchaTokenWritten(page, token, selectors...); err != nil {
 		return false, err
 	}
 	return fireRecaptchaCallback(page, token)
@@ -173,45 +217,97 @@ func injectTurnstileToken(page *rod.Page, token string) error {
 		`input[name="g-recaptcha-response"]`,
 		`textarea[name="g-recaptcha-response"]`,
 	}
-	return setValueAndShow(page, token, selectors...)
+	return ensureCaptchaTokenWritten(page, token, selectors...)
+}
+
+// ensureCaptchaTokenWritten sets the token on matching fields, creating a hidden
+// g-recaptcha-response textarea when none exist (common for v3 before first execute).
+func ensureCaptchaTokenWritten(page *rod.Page, token string, selectors ...string) error {
+	wrote, err := setValueAndShow(page, token, selectors...)
+	if err != nil {
+		return err
+	}
+	if wrote > 0 {
+		return nil
+	}
+
+	// No response field yet — create one so DetectCaptcha can see the solved token
+	// and the form can submit it.
+	_, err = page.Eval(`(token) => {
+		let el = document.querySelector('textarea[name="g-recaptcha-response"], input[name="g-recaptcha-response"]');
+		if (!el) {
+			el = document.createElement('textarea');
+			el.name = 'g-recaptcha-response';
+			el.id = 'g-recaptcha-response';
+			el.style.display = 'none';
+			(document.forms[0] || document.body).appendChild(el);
+		}
+		el.value = token;
+		el.innerHTML = token;
+		el.dispatchEvent(new Event('input', { bubbles: true }));
+		el.dispatchEvent(new Event('change', { bubbles: true }));
+		return true;
+	}`, token)
+	if err != nil {
+		return fmt.Errorf("create captcha response field: %w", err)
+	}
+	if !hasSolvedCaptchaToken(page) {
+		return fmt.Errorf("captcha token was not written to any response field")
+	}
+	return nil
 }
 
 // setValueAndShow sets el.value = value on every element matching any selector and
-// clears any display:none so hidden response fields are populated.
-func setValueAndShow(page *rod.Page, value string, selectors ...string) error {
+// clears any display:none so hidden response fields are populated. Returns how many
+// elements were updated.
+func setValueAndShow(page *rod.Page, value string, selectors ...string) (int, error) {
+	wrote := 0
 	for _, selector := range selectors {
 		els, err := page.Elements(selector)
 		if err != nil {
-			return fmt.Errorf("query %q: %w", selector, err)
+			return wrote, fmt.Errorf("query %q: %w", selector, err)
 		}
 		for _, el := range els {
-			if _, err := el.Eval(`(v) => { this.style.display = ''; this.value = v; }`, value); err != nil {
-				return fmt.Errorf("set value on %q: %w", selector, err)
+			if _, err := el.Eval(`(v) => {
+				this.style.display = '';
+				this.value = v;
+				if (this.tagName === 'TEXTAREA') this.innerHTML = v;
+				this.dispatchEvent(new Event('input', { bubbles: true }));
+				this.dispatchEvent(new Event('change', { bubbles: true }));
+			}`, value); err != nil {
+				return wrote, fmt.Errorf("set value on %q: %w", selector, err)
 			}
+			wrote++
 		}
 	}
-	return nil
+	return wrote, nil
 }
 
 // fireRecaptchaClientsJS walks the grecaptcha client registry and invokes the first
 // callback found for each client. Returns whether any callback fired. This operates on
 // the window object graph (not the DOM), so it has no typed go-rod equivalent.
+// Visited-set + depth cap are required: ___grecaptcha_cfg is cyclic and an unbounded
+// walk hangs the Eval forever (which looked like a MustWaitIdle hang in practice).
 const fireRecaptchaClientsJS = `(token) => {
 	let fired = false;
 	try {
 		const cfg = window.___grecaptcha_cfg;
 		if (cfg && cfg.clients) {
+			const visited = new Set();
+			const maxDepth = 20;
 			for (const k in cfg.clients) {
-				const stack = [cfg.clients[k]];
+				const stack = [{ node: cfg.clients[k], depth: 0 }];
 				while (stack.length) {
-					const node = stack.pop();
-					if (!node || typeof node !== 'object') continue;
+					const { node, depth } = stack.pop();
+					if (!node || typeof node !== 'object' || depth > maxDepth) continue;
+					if (visited.has(node)) continue;
+					visited.add(node);
 					for (const p in node) {
 						const v = node[p];
 						if (typeof v === 'function' && p === 'callback') {
 							try { v(token); fired = true; } catch (e) {}
 						} else if (v && typeof v === 'object') {
-							stack.push(v);
+							stack.push({ node: v, depth: depth + 1 });
 						}
 					}
 				}
@@ -243,7 +339,6 @@ func (a *Activity) ClickCaptchaButton(ctx context.Context, input ClickCaptchaBut
 	}
 
 	if clickInSearchable(page, input.Selector) {
-		page.MustWaitIdle()
 		return ClickCaptchaButtonOutput{Clicked: true}, nil
 	}
 
@@ -257,7 +352,6 @@ func (a *Activity) ClickCaptchaButton(ctx context.Context, input ClickCaptchaBut
 			continue
 		}
 		if clickInSearchable(framePage, input.Selector) {
-			page.MustWaitIdle()
 			return ClickCaptchaButtonOutput{Clicked: true}, nil
 		}
 	}

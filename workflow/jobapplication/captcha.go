@@ -3,6 +3,7 @@ package jobapplication
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	browseractivity "github.com/SomtoJF/iris-worker/activity/browser"
 	"github.com/SomtoJF/iris-worker/activity/captcha"
@@ -71,6 +72,17 @@ func solveAndInjectCaptcha(
 		return false, fmt.Errorf("inject token: %w", err)
 	}
 
+	// Prefer deterministic re-detect: InjectCaptchaToken leaves a token in the response
+	// field, and DetectCaptcha treats that as type=none. Invisible v3 has no visual
+	// "cleared" state, so vision alone would keep failing after a good inject.
+	post, err := detectCaptcha(sessionCtx, workflowID)
+	if err != nil {
+		return false, err
+	}
+	if post.Type == browseractivity.CaptchaTypeNone {
+		return true, nil
+	}
+
 	for attempt := 0; attempt < maxCaptchaVerifyAttempts; attempt++ {
 		verdict, err := verifyCaptchaVision(sessionCtx, workflowID, userID, idJobApplication)
 		if err != nil {
@@ -90,13 +102,17 @@ func solveAndInjectCaptcha(
 		if !clicked {
 			return false, nil
 		}
+
+		post, err = detectCaptcha(sessionCtx, workflowID)
+		if err != nil {
+			return false, err
+		}
+		if post.Type == browseractivity.CaptchaTypeNone {
+			return true, nil
+		}
 	}
 
-	post, err := detectCaptcha(sessionCtx, workflowID)
-	if err != nil {
-		return false, err
-	}
-	return post.Type == browseractivity.CaptchaTypeNone, nil
+	return false, nil
 }
 
 func detectCaptcha(sessionCtx workflow.Context, workflowID string) (browseractivity.DetectCaptchaOutput, error) {
@@ -119,12 +135,14 @@ func solveWithCapSolver(ctx workflow.Context, detected browseractivity.DetectCap
 }
 
 func injectCaptchaToken(sessionCtx workflow.Context, workflowID, captchaType, token string) (browseractivity.InjectCaptchaTokenOutput, error) {
+	// Keep sessionCtx affinity; only tighten the deadline for this call.
+	ctx := workflow.WithStartToCloseTimeout(sessionCtx, 45*time.Second)
 	var out browseractivity.InjectCaptchaTokenOutput
-	err := workflow.ExecuteActivity(sessionCtx, "InjectCaptchaToken", browseractivity.InjectCaptchaTokenInput{
+	err := workflow.ExecuteActivity(ctx, "InjectCaptchaToken", browseractivity.InjectCaptchaTokenInput{
 		WorkflowID: workflowID,
 		Type:       captchaType,
 		Token:      token,
-	}).Get(sessionCtx, &out)
+	}).Get(ctx, &out)
 	return out, err
 }
 
