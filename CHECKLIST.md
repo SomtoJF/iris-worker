@@ -62,9 +62,9 @@
 - [ x ] Users should be able to delete applications
 - [ x ] Investigate LLM often skips writing coverletters
 - [ x ] Investigate LLM often ignores optional fields
-- [ ] Implement viewing application data in realtime
 - [ x ] Improve cover letter writing
 - [ x ] Refactor cover letter tool so it can be used as a standalone feature
+- [ ] Implement status halted for truthfulness clause violations
 - [ ] Fix question-answer deduplication
 - [ ] Implement email notifications on successful/failed applications, comments on feedback and user action required. (Mailjet)
 - [ ] Figure out captcha solving
@@ -78,4 +78,3 @@
   - [ ] Workable (apply.workable.com)
   - [ ] Ashby (jobs.ashbyhq.com)
   - [ ] Remotefront (remotefront.com)
-- [ ] If an application to a company is currently running, users shouldn't be able to apply to that same company until the existing application is done.
