@@ -333,7 +333,7 @@ func planNextAction(ctx workflow.Context, input PlannerRequest) (PlannerResponse
 		SystemMessage:    systemPrompt,
 		UserMessage:      userPrompt,
 		ImageUrl:         &screenshotBase64,
-		Model:            "x-ai/grok-4.5",
+		Model:            "x-ai/grok-4.3",
 		ResponseSchema:   getPlannerResponseSchema(),
 		Temperature:      &temperaturePtr,
 		IdUser:           input.IdUser,
