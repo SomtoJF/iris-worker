@@ -18,6 +18,7 @@ const (
 	EventUserNotification      EventType = "USER_NOTIFICATION"
 	EventUserActionRequired    EventType = "USER_ACTION_REQUIRED"
 	EventApplicationCancelled  EventType = "APPLICATION_CANCELLED"
+	EventApplicationHalted     EventType = "APPLICATION_HALTED"
 )
 
 type Activities struct {

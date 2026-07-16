@@ -46,13 +46,25 @@ type QuestionAnswer struct {
 	Answer   string `json:"answer"`
 }
 
+// PlannerFailureStatus categorizes why the planner marked an application as failed.
+type PlannerFailureStatus string
+
+const (
+	PlannerFailureStatusCaptcha          PlannerFailureStatus = "CAPTCHA"
+	PlannerFailureStatusTruthfulness     PlannerFailureStatus = "TRUTHFULNESS"
+	PlannerFailureStatusLoginRequired    PlannerFailureStatus = "LOGIN_REQUIRED"
+	PlannerFailureStatusSubmissionError  PlannerFailureStatus = "SUBMISSION_ERROR"
+	PlannerFailureStatusOther            PlannerFailureStatus = "OTHER"
+)
+
 type PlannerResponse struct {
-	IsApplicationComplete bool             `json:"is_application_complete"`
-	IsApplicationFailed   bool             `json:"is_application_failed"`
-	FailureReason         *string          `json:"failure_reason,omitempty"`
-	ToolCall              *ToolCall        `json:"tool_call,omitempty"`
-	Reasoning             string           `json:"reasoning,omitempty"`
-	QuestionsAnswered     []QuestionAnswer `json:"questions_answered,omitempty"`
+	IsApplicationComplete bool                  `json:"is_application_complete"`
+	IsApplicationFailed   bool                  `json:"is_application_failed"`
+	FailureReason         *string               `json:"failure_reason,omitempty"`
+	FailureStatus         *PlannerFailureStatus `json:"failure_status,omitempty"`
+	ToolCall              *ToolCall             `json:"tool_call,omitempty"`
+	Reasoning             string                `json:"reasoning,omitempty"`
+	QuestionsAnswered     []QuestionAnswer      `json:"questions_answered,omitempty"`
 }
 
 type PlannerRequest struct {
@@ -413,6 +425,22 @@ func getPlannerResponseSchema() map[string]interface{} {
 				},
 				"description": "The reason the job application failed (string or null)",
 			},
+			"failure_status": map[string]interface{}{
+				"anyOf": []map[string]interface{}{
+					{
+						"type": "string",
+						"enum": []string{
+							string(PlannerFailureStatusCaptcha),
+							string(PlannerFailureStatusTruthfulness),
+							string(PlannerFailureStatusLoginRequired),
+							string(PlannerFailureStatusSubmissionError),
+							string(PlannerFailureStatusOther),
+						},
+					},
+					{"type": "null"},
+				},
+				"description": "Categorized failure status when is_application_failed is true; null otherwise",
+			},
 			"tool_call": map[string]interface{}{
 				"anyOf": []map[string]interface{}{
 					{"type": "null"},
@@ -455,7 +483,7 @@ func getPlannerResponseSchema() map[string]interface{} {
 				},
 			},
 		},
-		"required": []string{"is_application_complete", "is_application_failed", "failure_reason", "reasoning", "tool_call", "questions_answered"},
+		"required": []string{"is_application_complete", "is_application_failed", "failure_reason", "failure_status", "reasoning", "tool_call", "questions_answered"},
 	}
 }
 

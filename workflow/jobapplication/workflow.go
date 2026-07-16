@@ -29,9 +29,10 @@ type CancelSignalPayload struct {
 }
 
 type jobAppError struct {
-	PublicMessage string
-	LogMessage    string
-	Cause         error
+	PublicMessage  string
+	LogMessage     string
+	Cause          error
+	TerminalStatus sqldb.JobApplicationStatus
 }
 
 func (e jobAppError) Error() string {
@@ -50,9 +51,19 @@ func (e jobAppError) Unwrap() error {
 
 func newJobAppError(err error, logMsg string, publicMsg string) error {
 	return jobAppError{
-		PublicMessage: publicMsg,
-		LogMessage:    logMsg,
-		Cause:         err,
+		PublicMessage:  publicMsg,
+		LogMessage:     logMsg,
+		Cause:          err,
+		TerminalStatus: sqldb.JobApplicationStatusFailed,
+	}
+}
+
+func newHaltedJobAppError(err error, logMsg string, publicMsg string) error {
+	return jobAppError{
+		PublicMessage:  publicMsg,
+		LogMessage:     logMsg,
+		Cause:          err,
+		TerminalStatus: sqldb.JobApplicationStatusHalted,
 	}
 }
 
@@ -144,10 +155,14 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		}
 
 		publicMessage := "We couldn't complete your application. Please try again."
+		terminalStatus := sqldb.JobApplicationStatusFailed
 		var jobErr jobAppError
 		if errors.As(err, &jobErr) {
 			if jobErr.PublicMessage != "" {
 				publicMessage = jobErr.PublicMessage
+			}
+			if jobErr.TerminalStatus != "" {
+				terminalStatus = jobErr.TerminalStatus
 			}
 			if jobErr.LogMessage != "" {
 				logger.Error(jobErr.LogMessage, "error", err)
@@ -158,7 +173,11 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 			logger.Error("Job application workflow failed", "error", err)
 		}
 
-		handleApplicationError(ctx, input, jobDetails, publicMessage)
+		if terminalStatus == sqldb.JobApplicationStatusHalted {
+			handleApplicationHalted(ctx, input, jobDetails, publicMessage)
+		} else {
+			handleApplicationError(ctx, input, jobDetails, publicMessage)
+		}
 		return err
 	}
 
@@ -316,6 +335,9 @@ func executeJobApplication(
 			if plannerResponse.FailureReason != nil && *plannerResponse.FailureReason != "" {
 				failureReason = *plannerResponse.FailureReason
 			}
+			if plannerResponse.FailureStatus != nil && *plannerResponse.FailureStatus == PlannerFailureStatusTruthfulness {
+				return newHaltedJobAppError(fmt.Errorf("%s", failureReason), "Job application halted by truthfulness clause", failureReason)
+			}
 			return newJobAppError(fmt.Errorf("%s", failureReason), "Job application failed by planner", failureReason)
 		}
 
@@ -430,6 +452,27 @@ func handleApplicationError(ctx workflow.Context, input JobApplicationWorkflowIn
 	}).Get(newCtx, nil)
 }
 
+func handleApplicationHalted(ctx workflow.Context, input JobApplicationWorkflowInput, jobDetails JobDetails, haltReason string) {
+	newCtx, _ := workflow.NewDisconnectedContext(ctx)
+	cleanupOpts := workflow.ActivityOptions{
+		StartToCloseTimeout: 30 * time.Second,
+		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
+	}
+	newCtx = workflow.WithActivityOptions(newCtx, cleanupOpts)
+
+	var haltReasonPtr *string
+	if haltReason != "" {
+		haltReasonPtr = &haltReason
+	}
+	updateJobApplicationStatus(newCtx, input.IdJobApplication, sqldb.JobApplicationStatusHalted, haltReasonPtr)
+
+	workflow.ExecuteActivity(newCtx, "PublishRedisEvent", input.IdUser, string(realtimeevent.EventApplicationHalted), map[string]interface{}{
+		"id":          input.ApplicationExternalId,
+		"jobTitle":    jobDetails.JobTitle,
+		"companyName": jobDetails.CompanyName,
+	}).Get(newCtx, nil)
+}
+
 func handleApplicationSuccess(ctx workflow.Context, input JobApplicationWorkflowInput, jobDetails JobDetails) {
 	updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusApplied, nil)
 	workflow.ExecuteActivity(ctx, "PublishRedisEvent", input.IdUser, string(realtimeevent.EventApplicationSuccessful), map[string]interface{}{
@@ -446,13 +489,18 @@ func openWebpage(ctx workflow.Context, workflowID string, url string) error {
 	}).Get(ctx, nil)
 }
 
-func updateJobApplicationStatus(ctx workflow.Context, idJobApplication uint, status sqldb.JobApplicationStatus, failureReason *string) error {
+func updateJobApplicationStatus(ctx workflow.Context, idJobApplication uint, status sqldb.JobApplicationStatus, reason *string) error {
+	data := map[string]interface{}{
+		"status": status,
+	}
+	if status == sqldb.JobApplicationStatusHalted {
+		data["halt_reason"] = reason
+	} else {
+		data["failure_reason"] = reason
+	}
 	return workflow.ExecuteActivity(ctx, "UpdateJobApplication", sqldb.UpdateJobApplicationInput{
 		IdJobApplication: idJobApplication,
-		Data: map[string]interface{}{
-			"status":         status,
-			"failure_reason": failureReason,
-		},
+		Data:             data,
 	}).Get(ctx, nil)
 }
 

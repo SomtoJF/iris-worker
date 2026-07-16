@@ -99,6 +99,9 @@ JobApplicationWorkflow demonstrates the standard pattern:
 Required:
 - `OPENROUTER_API_KEY`: OpenRouter API key for LLM access
 
+## Complex Tasks
+Split complex tasks into smaller subtasks. Delegate subtasks to subagents running on Claude Opus 4.8 (`model: opus`). Main agent (Fable 5) acts as orchestrator only — coordinates, reviews results, doesn't do subtask work itself.
+
 ## Vendoring Rule
 
 Deploy builds (docker/Dockerfile) compile with `-mod=vendor` and never hit the network — the `replace github.com/SomtoJF/iris-api => ../iris-api` in go.mod only resolves locally. After changing worker deps OR anything in `iris-api/model`, run `go mod vendor` here and commit the vendor/ changes, otherwise the deploy builds a stale copy or fails.

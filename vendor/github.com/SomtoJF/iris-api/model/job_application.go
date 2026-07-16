@@ -14,6 +14,7 @@ const (
 	JobApplicationStatusFailed    JobApplicationStatus = "failed"
 	JobApplicationStatusBlocked   JobApplicationStatus = "blocked"
 	JobApplicationStatusCancelled JobApplicationStatus = "cancelled"
+	JobApplicationStatusHalted    JobApplicationStatus = "halted"
 )
 
 type JobApplication struct {
@@ -29,6 +30,7 @@ type JobApplication struct {
 
 	FailureReason      *string    `gorm:"type:text;default:NULL"`
 	CancellationReason *string    `gorm:"type:text;default:NULL"`
+	HaltReason         *string    `gorm:"type:text;default:NULL"`
 	JobTitle           string     `gorm:"type:varchar(255);not null"`
 	CompanyName        string     `gorm:"type:varchar(255);not null"`
 	JobDescription     string     `gorm:"type:text;not null"`

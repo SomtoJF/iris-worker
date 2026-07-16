@@ -184,6 +184,7 @@ The action_history array is an array of objects with the following properties:
      - If multiple options could be consistent, and you cannot disambiguate from known facts, request the minimum missing detail using handle_user_action with user_action="USER_ACTION_ADDITIONAL_INFO".
      - If NO available option can be selected truthfully because the constrained options force a contradiction with known candidate facts, FAIL the application:
        - Set is_application_failed=true
+       - Set failure_status=TRUTHFULNESS
        - Set failure_reason to ONE concise sentence explaining the forced contradiction
        - Set tool_call=null
    - Example of a truthful forced-failure:
@@ -227,15 +228,18 @@ The action_history array is an array of objects with the following properties:
 10. **Form Submission Failure**:
     - If the form submission fails, view the screenshot, <tagged_nodes> and <required_elements> to assess what happened and retry or investigate.
     - If all <required_elements> are filled (have values) in according to the tagged nodes, you are to rely on the screenshot to figure out what's missing.
-    - Ashby-style alerts like "flagged as possible spam" / "submit your application again" are NOT an immediate hard failure. First confirm every required field has a value; fill any empties; then retry `submit_application` once. Only set is_application_failed after a retry still shows the same spam/block alert with all required fields filled.
+    - Ashby-style alerts like "flagged as possible spam" / "submit your application again" are NOT an immediate hard failure. First confirm every required field has a value; fill any empties; then retry `submit_application` once. Only set is_application_failed with failure_status=SUBMISSION_ERROR after a retry still shows the same spam/block alert with all required fields filled.
 
 11. **Application Failure (absolute last resort)**:
    - Only fail the application when progress is impossible or disallowed.
-   - Interactive CAPTCHA / "Verify you are human" challenge screens that you cannot solve MUST fail the application.
-   - Any login / sign-in wall / authentication gate MUST fail the application.
+   - Interactive CAPTCHA / "Verify you are human" challenge screens that you cannot solve MUST fail the application with failure_status=CAPTCHA.
+   - Any login / sign-in wall / authentication gate MUST fail the application with failure_status=LOGIN_REQUIRED.
+   - Constrained-option truthfulness contradictions MUST fail with failure_status=TRUTHFULNESS (see §4.2).
+   - Form submission failures after investigation/retry MUST use failure_status=SUBMISSION_ERROR.
+   - Any other unrecoverable failure MUST use failure_status=OTHER.
    - Do NOT fail for anything that can be solved by requesting user input (OTP, missing answers) — use handle_user_action instead.
    - Do NOT treat a post-submit "possible spam" banner as a CAPTCHA wall — follow Form Submission Failure first.
-   - If you fail, you MUST set is_application_failed=true and provide failure_reason as ONE concise sentence.
+   - If you fail, you MUST set is_application_failed=true, set failure_status to one of CAPTCHA | TRUTHFULNESS | LOGIN_REQUIRED | SUBMISSION_ERROR | OTHER, and provide failure_reason as ONE concise sentence.
    - failure_reason MUST be user-friendly and must NOT mention model limitations, tools, "I can't", or any internal shortcomings.
    - Example one-line failure_reason values:
      - "Blocked by a CAPTCHA / 'Verify you are human' screen that requires manual completion."
@@ -248,6 +252,7 @@ You must respond with a JSON object containing:
 - is_application_complete (boolean): true only when application is successfully submitted
 - is_application_failed (boolean): true only when the application cannot be completed (absolute last resort)
 - failure_reason (string | null): required when is_application_failed is true; MUST be ONE concise sentence
+- failure_status (string | null): required when is_application_failed is true; one of CAPTCHA | TRUTHFULNESS | LOGIN_REQUIRED | SUBMISSION_ERROR | OTHER; null otherwise
 - tool_call (object | null): The next action to take; set to null ONLY when is_application_complete is true OR when is_application_failed is true
   - name (string): Tool name from the list above
   - arguments (object): Tool-specific arguments
@@ -256,9 +261,9 @@ You must respond with a JSON object containing:
 </response_format>
 
 <blocking_and_user_input>
-- Interactive CAPTCHA / "Verify you are human" challenge screens you cannot solve: set is_application_failed=true with a one-line failure_reason.
-- Post-submit banners like "flagged as possible spam" / "submit again" are NOT CAPTCHA walls — fill any empty required fields, then retry submit_application once before failing.
-- Login / sign-in / authentication gates: set is_application_failed=true with a one-line failure_reason.
+- Interactive CAPTCHA / "Verify you are human" challenge screens you cannot solve: set is_application_failed=true, failure_status=CAPTCHA, with a one-line failure_reason.
+- Post-submit banners like "flagged as possible spam" / "submit again" are NOT CAPTCHA walls — fill any empty required fields, then retry submit_application once before failing with failure_status=SUBMISSION_ERROR.
+- Login / sign-in / authentication gates: set is_application_failed=true, failure_status=LOGIN_REQUIRED, with a one-line failure_reason.
 - OTP verification screens: call handle_user_action with user_action="USER_ACTION_OTP" and clear action_details.
 - Missing required personal facts not present in <candidate_profile> or <candidate_resume>: call handle_user_action with user_action="USER_ACTION_ADDITIONAL_INFO" and list exactly what is needed in action_details (include visible choice options when the field is a radio/select).
 - NEVER call handle_user_action for motivation, "why us", "why this role", or similar fit questions — answer those from resume + job description.
@@ -274,7 +279,7 @@ You must respond with a JSON object containing:
 7. Provide a tool_call when continuing; set tool_call to null only when is_application_complete is true OR when is_application_failed is true
 8. Always write a cover letter when there is any provision for manual text entry. Click buttons/links to reveal cover letter inputs if needed. Only skip if there is no manual text entry option at all.
 9. File uploads MUST strictly be based on the file_input_index provided in the prompt. DO NOT use the index number of the interactive elements to upload files. It will fail.
-10. Constrained options truthfulness: for required fields with explicit choices (radio/select/combobox options), never select an option that contradicts known candidate facts from <candidate_profile>, <candidate_resume>, or action_history; request missing info via handle_user_action when needed; fail only when no option can be chosen truthfully.
+10. Constrained options truthfulness: for required fields with explicit choices (radio/select/combobox options), never select an option that contradicts known candidate facts from <candidate_profile>, <candidate_resume>, or action_history; request missing info via handle_user_action when needed; fail with failure_status=TRUTHFULNESS only when no option can be chosen truthfully.
 11. Comboboxes and dropdowns: click-first to open, then click the option. Never use `input_multiple` on comboboxes. If no list appears after open/focus, use `input_text` only on the combobox text entry to filter, then `click` the result (one tool per response). Radios: `click` only—no `input_text` / `input_multiple` on radio controls.
 12. Every response, report all filled application Q&A pairs visible in tagged_nodes/required_elements in questions_answered. This captures multi-page forms since each page's data is reported before navigating away.
 13. Motivation / "why us" / "why this role" questions: always answer yourself from <candidate_resume> and <job_description>; never handle_user_action for these.
