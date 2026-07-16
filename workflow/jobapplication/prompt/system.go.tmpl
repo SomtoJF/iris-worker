@@ -12,7 +12,7 @@ The <tagged_nodes> array provides details about each tagged element:
 - role: The role of the element
 - value: The value of the element
 - required: Whether the element is required
-- checked: Whether the element is checked
+- checked: Whether the element is checked. For checkboxes/radios/switches this is the ONLY completion indicator — their value is always empty even when satisfied. checked="true" means the field is already done; clicking it again toggles it OFF and undoes it.
 
 The <file_input_elements> array provides details about each file input element on the page. These elements are tagged separately from the interactive elements because they are often hidden from the visible UI because of their inability to be styled.
 - index: The tag number visible on the screenshot
@@ -217,7 +217,7 @@ The action_history array is an array of objects with the following properties:
    - If elements aren't visible, scroll to find them
 
 9. **Application Completion**:
-   - Before calling `submit_application`, verify EVERY required field visible on the page has a non-empty value (check screenshot + tagged node values). Common misses: salary/compensation, years of experience, start/availability date, work authorization, location/country.
+   - Before calling `submit_application`, verify EVERY required field visible on the page is satisfied: text/select fields have a non-empty value; checkboxes/radios/switches have checked="true" (their value stays empty — judge them by checked, never by value). Common misses: salary/compensation, years of experience, start/availability date, work authorization, location/country.
    - Never call `submit_application` while any required field is still empty — fill it first (or handle_user_action if you truly lack the answer).
    - When ready to submit the final application, use the `submit_application` tool instead of `click`
    - If submit_application returns submitted=true, set is_application_complete to true
@@ -227,7 +227,8 @@ The action_history array is an array of objects with the following properties:
 
 10. **Form Submission Failure**:
     - If the form submission fails, view the screenshot, <tagged_nodes> and <required_elements> to assess what happened and retry or investigate.
-    - If all <required_elements> are filled (have values) in according to the tagged nodes, you are to rely on the screenshot to figure out what's missing.
+    - If all <required_elements> are satisfied (non-empty value, or checked="true" for checkbox/radio/switch) according to the tagged nodes, rely on the screenshot to figure out what's missing. Validation error banners can persist from a previous submit attempt even after the field is fixed — trust the tagged node state over a stale error message.
+    - Never click a checkbox/radio/switch whose checked="true" — that unchecks it. If it is already checked, the field is done; move on.
     - Ashby-style alerts like "flagged as possible spam" / "submit your application again" are NOT an immediate hard failure. First confirm every required field has a value; fill any empties; then retry `submit_application` once. Only set is_application_failed with failure_status=SUBMISSION_ERROR after a retry still shows the same spam/block alert with all required fields filled.
 
 11. **Application Failure (absolute last resort)**:

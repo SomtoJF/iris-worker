@@ -190,6 +190,10 @@ temporal workflow start \
   --workflow-id "$WF_ID" \
   --input '{"url":"...","id_user":1,"id_resume":1,"id_job_application":19,"application_external_id":"..."}'
 
+# NEVER rerun successful (applied) applications — only rerun failed ones.
+# Known-good sample input (Greenhouse / Stratolaunch):
+# {"url":"https://job-boards.greenhouse.io/stratolaunch/jobs/5345941008","id_user":1,"id_resume":1,"id_job_application":20,"application_external_id":"4d11381f-8e6b-4d90-91be-523697045be4"}
+
 # 3. Watch status / failures
 temporal workflow describe --address localhost:7233 --workflow-id "$WF_ID"
 temporal workflow show --address localhost:7233 --workflow-id "$WF_ID" --follow
