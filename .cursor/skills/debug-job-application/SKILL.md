@@ -134,7 +134,7 @@ Browser observation complements Temporal; prefer Temporal for *why* an activity 
 | `this.select is not a function` / not editable | Planner typed into radio/button | Reject non-editable targets; radios/checkboxes need `click` |
 | Click StartToClose timeout | rod WaitInteractable/stable hang | Bound timeout + JS `element.click()` fallback |
 | CapSolver `check ... invisible` | v2 invisible not passed to CapSolver | Pass `isInvisible: true` from DetectCaptcha |
-| Scrape empty / bad JSON job details | Serper down + Colly can't render SPA | Prefer `GetPageText` from open browser page |
+| Scrape empty / bad JSON job details | Serper down + Colly can't render SPA | Check `ScrapeWebPage` (advanced=true → Serper) output; verify SERPER_API_KEY |
 | Ashby "flagged as possible spam" | ATS bot filter / repeated test submits | Fill all required fields first; retry once; if persistent, try without CDP observe and/or a fresh applicant identity |
 
 ## Success criteria

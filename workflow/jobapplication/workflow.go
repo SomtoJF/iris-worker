@@ -247,7 +247,7 @@ func executeJobApplication(
 		}).Get(newCtx, nil)
 	}()
 
-	retrieved, err := retrieveJobDetails(sessionCtx, workflowID, input.Url, input.IdUser, input.IdJobApplication)
+	retrieved, err := retrieveJobDetails(sessionCtx, input.Url, input.IdUser, input.IdJobApplication)
 	if err != nil {
 		return newJobAppError(err, "Failed to retrieve job details", "We couldn't retrieve the job details")
 	}

@@ -98,25 +98,6 @@ func (a *Activity) GetBase64Screenshot(ctx context.Context, input GetBase64Scree
 	return fmt.Sprintf("data:image/jpeg;base64,%s", base64Screenshot), nil
 }
 
-func (a *Activity) GetPageText(ctx context.Context, input GetPageTextInput) (string, error) {
-	a.mu.Lock()
-	page, exists := a.activeSessions[input.WorkflowID]
-	a.mu.Unlock()
-
-	if !exists {
-		return "", fmt.Errorf("no active page for workflow %s", input.WorkflowID)
-	}
-
-	res, err := page.Timeout(15 * time.Second).Eval(`() => {
-		const root = document.body || document.documentElement;
-		return root ? (root.innerText || root.textContent || '') : '';
-	}`)
-	if err != nil {
-		return "", fmt.Errorf("failed to read page text: %w", err)
-	}
-	return res.Value.Str(), nil
-}
-
 func (a *Activity) Click(ctx context.Context, input ClickInput) error {
 	a.mu.Lock()
 	page, exists := a.activeSessions[input.WorkflowID]

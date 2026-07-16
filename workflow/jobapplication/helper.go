@@ -504,31 +504,19 @@ type JobDetails struct {
 	IsValidJobPosting bool   `json:"is_valid_job_posting"`
 }
 
-func retrieveJobDetails(ctx workflow.Context, workflowID string, url string, idUser uint, idJobApplication uint) (JobDetails, error) {
-	// Prefer the already-open browser page (JS-rendered). Serper/Colly often fail
-	// on SPAs like Ashby and return empty shells.
-	var pageText string
-	if err := workflow.ExecuteActivity(ctx, "GetPageText", browseractivity.GetPageTextInput{
-		WorkflowID: workflowID,
-	}).Get(ctx, &pageText); err != nil {
-		return JobDetails{}, fmt.Errorf("get page text: %w", err)
+func retrieveJobDetails(ctx workflow.Context, url string, idUser uint, idJobApplication uint) (JobDetails, error) {
+	var scrapeOutput map[string]interface{}
+	if err := workflow.ExecuteActivity(ctx, "ScrapeWebPage", map[string]interface{}{
+		"url":                url,
+		"advanced":           true,
+		"id_user":            idUser,
+		"id_job_application": idJobApplication,
+	}).Get(ctx, &scrapeOutput); err != nil {
+		return JobDetails{}, err
 	}
-	if strings.TrimSpace(pageText) == "" {
-		// Fallback to Serper/Colly scrape if the page text is empty.
-		var scrapeOutput map[string]interface{}
-		if err := workflow.ExecuteActivity(ctx, "ScrapeWebPage", map[string]interface{}{
-			"url":                url,
-			"advanced":           true,
-			"id_user":            idUser,
-			"id_job_application": idJobApplication,
-		}).Get(ctx, &scrapeOutput); err != nil {
-			return JobDetails{}, err
-		}
-		scrapedData, ok := scrapeOutput["data"].(string)
-		if !ok || strings.TrimSpace(scrapedData) == "" {
-			return JobDetails{}, fmt.Errorf("failed to get scraped data")
-		}
-		pageText = scrapedData
+	pageText, ok := scrapeOutput["data"].(string)
+	if !ok || strings.TrimSpace(pageText) == "" {
+		return JobDetails{}, fmt.Errorf("failed to get scraped data")
 	}
 
 	systemPrompt := "Extract the job title, company name, and job description from the provided scraped webpage content. Return the data in JSON format. Most job descriptions have a 'Who we are' or 'About us' or 'Company Description' section that contains the company's details. This is where you should look for the company name. If this page doesn't include the job description, It is invalid and you should set is_valid_job_posting to false. For invalid job postings, return an empty string for the job description, job title, and company name."
