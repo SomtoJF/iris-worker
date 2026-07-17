@@ -18,6 +18,8 @@ var captchaResponseSelectors = []string{
 	`input[name="g-recaptcha-response"]`,
 	`input[name="cf-turnstile-response"]`,
 	`input[name="cf_turnstile_response"]`,
+	`textarea[name="h-captcha-response"]`,
+	`input[name="h-captcha-response"]`,
 }
 
 // DetectCaptcha inspects the live page for a captcha and returns its type + args.
@@ -52,6 +54,7 @@ func (a *Activity) DetectCaptcha(ctx context.Context, input DetectCaptchaInput) 
 	var out DetectCaptchaOutput
 	switch {
 	case detectTurnstile(page, iframeSrcs, &out):
+	case detectHcaptcha(page, iframeSrcs, &out):
 	case detectRecaptchaV2(page, iframeSrcs, &out):
 	case detectRecaptchaV3(page, &out):
 	default:
@@ -100,6 +103,35 @@ func detectTurnstile(page *rod.Page, iframeSrcs []string, out *DetectCaptchaOutp
 		}
 		if cdata := attr(el, "data-cdata"); cdata != "" {
 			out.Extra["cdata"] = cdata
+		}
+	}
+	return true
+}
+
+// detectHcaptcha: a .h-captcha[data-sitekey] element OR an iframe src containing
+// "hcaptcha.com". Sitekey from data-sitekey or the iframe "sitekey" param. Lever
+// (jobs.lever.co) uses hCaptcha, including its drag-the-shapes visual challenges.
+func detectHcaptcha(page *rod.Page, iframeSrcs []string, out *DetectCaptchaOutput) bool {
+	frameSrc, hasFrame := firstContaining(iframeSrcs, "hcaptcha.com")
+	el := firstElement(page, ".h-captcha[data-sitekey]", "[data-sitekey].h-captcha", `[data-sitekey][class*="h-captcha"]`)
+	if el == nil && !hasFrame {
+		return false
+	}
+
+	out.Type = CaptchaTypeHcaptcha
+	if el != nil {
+		out.SiteKey = attr(el, "data-sitekey")
+		out.Invisible = attr(el, "data-size") == "invisible"
+	}
+	if out.SiteKey == "" && hasFrame {
+		if u, err := url.Parse(frameSrc); err == nil {
+			// hCaptcha frames carry params either as query or fragment (#frame=checkbox&sitekey=...)
+			out.SiteKey = u.Query().Get("sitekey")
+			if out.SiteKey == "" {
+				if fq, err := url.ParseQuery(u.Fragment); err == nil {
+					out.SiteKey = fq.Get("sitekey")
+				}
+			}
 		}
 	}
 	return true
@@ -179,9 +211,12 @@ func (a *Activity) InjectCaptchaToken(ctx context.Context, input InjectCaptchaTo
 
 	var callbackFired bool
 	var err error
-	if input.Type == CaptchaTypeTurnstile {
+	switch input.Type {
+	case CaptchaTypeTurnstile:
 		err = injectTurnstileToken(page, input.Token)
-	} else {
+	case CaptchaTypeHcaptcha:
+		err = injectHcaptchaToken(page, input.Token)
+	default:
 		callbackFired, err = injectRecaptchaToken(page, input.Token)
 	}
 	if err != nil {
@@ -216,6 +251,18 @@ func injectTurnstileToken(page *rod.Page, token string) error {
 		`input[name="cf_turnstile_response"]`,
 		`input[name="g-recaptcha-response"]`,
 		`textarea[name="g-recaptcha-response"]`,
+	}
+	return ensureCaptchaTokenWritten(page, token, selectors...)
+}
+
+// injectHcaptchaToken writes the token into the h-captcha-response field (and the
+// g-recaptcha-response field, which the hCaptcha widget mirrors for compatibility).
+func injectHcaptchaToken(page *rod.Page, token string) error {
+	selectors := []string{
+		`textarea[name="h-captcha-response"]`,
+		`input[name="h-captcha-response"]`,
+		`textarea[name="g-recaptcha-response"]`,
+		`input[name="g-recaptcha-response"]`,
 	}
 	return ensureCaptchaTokenWritten(page, token, selectors...)
 }

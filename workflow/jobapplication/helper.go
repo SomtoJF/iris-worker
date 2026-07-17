@@ -50,11 +50,11 @@ type QuestionAnswer struct {
 type PlannerFailureStatus string
 
 const (
-	PlannerFailureStatusCaptcha          PlannerFailureStatus = "CAPTCHA"
-	PlannerFailureStatusTruthfulness     PlannerFailureStatus = "TRUTHFULNESS"
-	PlannerFailureStatusLoginRequired    PlannerFailureStatus = "LOGIN_REQUIRED"
-	PlannerFailureStatusSubmissionError  PlannerFailureStatus = "SUBMISSION_ERROR"
-	PlannerFailureStatusOther            PlannerFailureStatus = "OTHER"
+	PlannerFailureStatusCaptcha         PlannerFailureStatus = "CAPTCHA"
+	PlannerFailureStatusTruthfulness    PlannerFailureStatus = "TRUTHFULNESS"
+	PlannerFailureStatusLoginRequired   PlannerFailureStatus = "LOGIN_REQUIRED"
+	PlannerFailureStatusSubmissionError PlannerFailureStatus = "SUBMISSION_ERROR"
+	PlannerFailureStatusOther           PlannerFailureStatus = "OTHER"
 )
 
 type PlannerResponse struct {
@@ -504,19 +504,10 @@ type JobDetails struct {
 	IsValidJobPosting bool   `json:"is_valid_job_posting"`
 }
 
-func retrieveJobDetails(ctx workflow.Context, url string, idUser uint, idJobApplication uint) (JobDetails, error) {
-	var scrapeOutput map[string]interface{}
-	if err := workflow.ExecuteActivity(ctx, "ScrapeWebPage", map[string]interface{}{
-		"url":                url,
-		"advanced":           true,
-		"id_user":            idUser,
-		"id_job_application": idJobApplication,
-	}).Get(ctx, &scrapeOutput); err != nil {
+func retrieveJobDetails(ctx workflow.Context, workflowID string, url string, idUser uint, idJobApplication uint) (JobDetails, error) {
+	pageText, err := scrapeJobPageText(ctx, workflowID, url, idUser, idJobApplication)
+	if err != nil {
 		return JobDetails{}, err
-	}
-	pageText, ok := scrapeOutput["data"].(string)
-	if !ok || strings.TrimSpace(pageText) == "" {
-		return JobDetails{}, fmt.Errorf("failed to get scraped data")
 	}
 
 	systemPrompt := "Extract the job title, company name, and job description from the provided scraped webpage content. Return the data in JSON format. Most job descriptions have a 'Who we are' or 'About us' or 'Company Description' section that contains the company's details. This is where you should look for the company name. If this page doesn't include the job description, It is invalid and you should set is_valid_job_posting to false. For invalid job postings, return an empty string for the job description, job title, and company name."
@@ -544,6 +535,42 @@ func retrieveJobDetails(ctx workflow.Context, url string, idUser uint, idJobAppl
 	}
 
 	return jobDetails, nil
+}
+
+// scrapeJobPageText returns the job page text, falling back through the scrape
+// pipeline: ScrapeWebPage (Serper → Colly) first, then the rod-rendered page the
+// workflow already opened. The rod fallback covers client-side SPAs (Ashby, Lever,
+// Workable) that Colly can't render and transient Serper 5xx outages, both of which
+// otherwise fail the whole application at step one.
+func scrapeJobPageText(ctx workflow.Context, workflowID string, url string, idUser uint, idJobApplication uint) (string, error) {
+	logger := workflow.GetLogger(ctx)
+
+	var scrapeOutput map[string]interface{}
+	err := workflow.ExecuteActivity(ctx, "ScrapeWebPage", map[string]interface{}{
+		"url":                url,
+		"advanced":           true,
+		"id_user":            idUser,
+		"id_job_application": idJobApplication,
+	}).Get(ctx, &scrapeOutput)
+	if err == nil {
+		if pageText, ok := scrapeOutput["data"].(string); ok && strings.TrimSpace(pageText) != "" {
+			return pageText, nil
+		}
+		logger.Warn("ScrapeWebPage returned empty data, falling back to rod-rendered page")
+	} else {
+		logger.Warn("ScrapeWebPage failed, falling back to rod-rendered page", "error", err)
+	}
+
+	var rendered browseractivity.ScrapeRenderedPageOutput
+	if err := workflow.ExecuteActivity(ctx, "ScrapeRenderedPage", browseractivity.ScrapeRenderedPageInput{
+		WorkflowID: workflowID,
+	}).Get(ctx, &rendered); err != nil {
+		return "", fmt.Errorf("failed to get scraped data (serper/colly empty, rod fallback failed: %w)", err)
+	}
+	if strings.TrimSpace(rendered.Data) == "" {
+		return "", fmt.Errorf("failed to get scraped data")
+	}
+	return rendered.Data, nil
 }
 
 func truncateForErr(s string, n int) string {
@@ -619,7 +646,9 @@ func deduplicateQA(ctx workflow.Context, idUser uint, idJobApplication uint, que
 	llmRequest := types.AIPIRequest{
 		SystemMessage: "You are cleaning up job application form Q&A pairs.\n\nTask: Deduplicate the list by merging ONLY entries that clearly refer to the exact same underlying question but use different wording (label drift).\n\nHard rules:\n- Be conservative: if you are not confident two questions are the same, DO NOT merge.\n- Never merge questions that differ in intent (e.g. \"Phone\" vs \"Mobile phone\", \"Location\" vs \"Willing to relocate\", \"Work authorization\" vs \"Visa sponsorship\").\n- Never invent new answers or modify answers.\n- Prefer keeping separate entries over incorrect merges.\n\nWhen you do merge:\n- Keep the most descriptive/clear question text.\n- If the answers are identical (ignoring case/whitespace), keep one.\n- If answers differ, only choose one if you can justify they are the same value in different formatting (e.g. \"Yes\" vs \"yes\", phone formatting). Otherwise keep BOTH as separate entries.\n\nReturn ONLY valid JSON matching the schema.",
 		UserMessage:   string(questionsJSON),
-		Model:         "google/gemma-4-31b-it:free",
+		// Free/small models ignore strict json_schema here (returned fenced markdown + a bare
+		// array), so the parse failed and the raw un-deduped list was saved.
+		Model: "deepseek/deepseek-v4-flash",
 		ResponseSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -646,10 +675,39 @@ func deduplicateQA(ctx workflow.Context, idUser uint, idJobApplication uint, que
 		return nil, fmt.Errorf("CallLLM: %w", err)
 	}
 
+	return parseDeduplicateQAResponse(llmResponse.Content)
+}
+
+// parseDeduplicateQAResponse tolerates the two ways the LLM drifts from the schema:
+// markdown code fences around the JSON, and a bare array instead of {"questions":[...]}.
+// Without this, a stray fence silently discards the dedup result and the raw list is saved.
+func parseDeduplicateQAResponse(content string) ([]sqldb.JobApplicationQuestion, error) {
+	cleaned := stripJSONCodeFence(content)
+
 	var resp deduplicateQAResponse
-	if err := json.Unmarshal([]byte(llmResponse.Content), &resp); err != nil {
-		return nil, fmt.Errorf("unmarshal dedup response: %w", err)
+	if err := json.Unmarshal([]byte(cleaned), &resp); err == nil {
+		return resp.Questions, nil
 	}
 
-	return resp.Questions, nil
+	// Fall back to a bare array top level.
+	var arr []sqldb.JobApplicationQuestion
+	if err := json.Unmarshal([]byte(cleaned), &arr); err != nil {
+		return nil, fmt.Errorf("unmarshal dedup response: %w", err)
+	}
+	return arr, nil
+}
+
+// stripJSONCodeFence removes a surrounding ```json ... ``` (or plain ``` ... ```) fence.
+func stripJSONCodeFence(s string) string {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "```") {
+		return s
+	}
+	s = strings.TrimPrefix(s, "```")
+	s = strings.TrimPrefix(s, "json")
+	s = strings.TrimPrefix(s, "JSON")
+	if i := strings.LastIndex(s, "```"); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
 }

@@ -27,29 +27,34 @@ make clean
 ## Architecture
 
 ### Core Pattern: Temporal Workflow System
+
 iris-worker is a Temporal worker that executes job application workflows. The architecture follows Temporal's separation of workflows (orchestration) and activities (execution).
 
 ### Key Components
 
 **main.go**: Entry point that:
+
 - Initializes SQLite DB connection (global `init()`)
 - Creates `Dependencies` container (AIPI client, browser factory, temp filesystem)
 - Registers workflow and activities to task queue `job-application`
 - Starts Temporal worker
 
 **common/dependencies.go**: Dependency injection container providing:
+
 - `AIPIClient` - LLM interface via OpenRouter
 - `BrowserClient` - Browser automation via go-rod
 - `TemporaryFileSystem` - Temp file management with cleanup
 - All dependencies initialized via `MakeDependencies()` and cleaned up via `Cleanup()`
 
 **Workflows** (workflow/):
+
 - Live in `workflow/` directory, organized by domain (e.g., `jobapplication/`)
 - Pure orchestration - no direct I/O, only activity calls
 - Helper functions in `helper.go`, main workflow logic in `workflow.go`
 - `jobapplication/JobApplicationWorkflow`: Agentic loop (max 20 iterations) that plans actions via LLM and executes tool calls until application complete
 
 **Activities** (activity/):
+
 - Grouped by responsibility: `llm/`, `sqldb/`
 - Each activity package exports a struct with methods (e.g., `sqldb.Activity`, `llm.Activity`)
 - Registered to worker via `NewActivities(deps)` constructor pattern
@@ -57,6 +62,7 @@ iris-worker is a Temporal worker that executes job application workflows. The ar
 - `llm.Activity`: LLM completions via AIPI
 
 **AIPI Client** (aipi/):
+
 - Abstraction over LLM providers (currently OpenRouter)
 - `aipi/types/types.go`: Common request/response types (AIPIRequest, AIPIResponse)
 - `aipi/openrouter/provider.go`: OpenRouter implementation with:
@@ -67,6 +73,7 @@ iris-worker is a Temporal worker that executes job application workflows. The ar
 - `aipi/client.go`: Main client interface
 
 **Browser Factory** (browserfactory/):
+
 - `BrowserFactory`: Wraps go-rod browser instance
 - `ScreenshotForLLM()`: Captures page screenshots with:
   - Transparent grid overlay
@@ -76,12 +83,14 @@ iris-worker is a Temporal worker that executes job application workflows. The ar
 - Used for visual LLM context in workflows
 
 **Initializers** (initializers/):
+
 - `sqldb/`: Global DB connection to SQLite at `~/iris/db/gorm.db`
 - `fs/`: Temporary filesystem with auto-cleanup (`os.MkdirTemp` wrapper)
 
 ### Data Models
 
 **JobApplication** (activity/sqldb/activity.go):
+
 - Status: `processing`, `applied`, `failed`
 - Tracked by `id_job_application` (uint primary key)
 - External ID via UUID (`id_external`)
@@ -89,6 +98,7 @@ iris-worker is a Temporal worker that executes job application workflows. The ar
 ### Workflow Execution Pattern
 
 JobApplicationWorkflow demonstrates the standard pattern:
+
 1. Set activity options (timeout, retry policy) via `workflow.WithActivityOptions`
 2. Execute activities via `workflow.ExecuteActivity(ctx, "ActivityName", input).Get(ctx, &result)`
 3. Use helper functions (e.g., `updateJobApplicationStatus`) to wrap activity calls
@@ -97,9 +107,11 @@ JobApplicationWorkflow demonstrates the standard pattern:
 ### Environment Variables
 
 Required:
+
 - `OPENROUTER_API_KEY`: OpenRouter API key for LLM access
 
 ## Complex Tasks
+
 Split complex tasks into smaller subtasks. Delegate subtasks to subagents running on Claude Opus 4.8 (`model: opus`). Main agent (Fable 5) acts as orchestrator only — coordinates, reviews results, doesn't do subtask work itself.
 
 ## Vendoring Rule
@@ -191,8 +203,15 @@ temporal workflow start \
   --input '{"url":"...","id_user":1,"id_resume":1,"id_job_application":19,"application_external_id":"..."}'
 
 # NEVER rerun successful (applied) applications — only rerun failed ones.
-# Known-good sample input (Greenhouse / Stratolaunch):
-# {"url":"https://job-boards.greenhouse.io/stratolaunch/jobs/5345941008","id_user":1,"id_resume":1,"id_job_application":20,"application_external_id":"4d11381f-8e6b-4d90-91be-523697045be4"}
+# Captchas are solved deterministically BEFORE the planner sees the page (workflow/jobapplication/captcha.go),
+# never via HandleUserAction. If the planner fails with failure_status=CAPTCHA on a solvable captcha, the cause
+# is DetectCaptcha returning type=none. Supported: turnstile, recaptcha v2/v3, hcaptcha. Lever (jobs.lever.co)
+# uses hCaptcha (CapSolver HCaptchaTaskProxyless — exact lowercase "less"; the "...ProxyLess" capital-L
+# spelling used for recaptcha/turnstile is rejected for hCaptcha). To add a type: extend DetectCaptcha detect*,
+# InjectCaptchaToken, activity/captcha buildTask, and the CaptchaType* constants.
+# NOTE: hCaptcha solving is GATED per CapSolver account. createTask ERROR_INVALID_TASK_DATA "We don't support
+# this service" = type correct but hCaptcha not enabled on the account (enable in CapSolver, not code); vs
+# "This service is not supported: <Type>" = bad type name. Check: getBalance + createTask w/ known hCaptcha sitekey.
 
 # 3. Watch status / failures
 temporal workflow describe --address localhost:7233 --workflow-id "$WF_ID"

@@ -78,6 +78,13 @@ func buildTask(input SolveWithCapSolverInput) (map[string]interface{}, error) {
 		task["minScore"] = 0.7
 	case browser.CaptchaTypeTurnstile:
 		task["type"] = "AntiTurnstileTaskProxyLess"
+	case browser.CaptchaTypeHcaptcha:
+		// CapSolver's hCaptcha endpoint requires the exact lowercase-"less" spelling
+		// ("HCaptchaTaskProxyless"); "HCaptchaTaskProxyLess" is rejected as ERROR_INVALID_TASK_DATA.
+		task["type"] = "HCaptchaTaskProxyless"
+		if input.Invisible {
+			task["isInvisible"] = true
+		}
 	default:
 		return nil, fmt.Errorf("unsupported captcha type: %s", input.Type)
 	}

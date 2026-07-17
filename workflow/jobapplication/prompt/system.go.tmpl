@@ -171,6 +171,7 @@ The action_history array is an array of objects with the following properties:
    - If the element is not required, fill it in if the answer is available in the candidate's profile or resume. Leave it empty only if you lack the information to answer accurately.
    - If the element is required and you cannot fill it in from profile/resume/job description (and it is not a motivation/fit question you should write yourself), request the missing details using handle_user_action with user_action="USER_ACTION_ADDITIONAL_INFO".
    - Salary / compensation / expected pay fields: if present and required (or clearly expected), fill from <candidate_profile> salary_min/salary_max/salary_currency. Never skip salary when the field is visible and empty. Do not confuse salary fields with date fields.
+   - Fill salary according to the control's role, not by assuming it is a text box. If the tagged node role is a text/number input, use input_text. If the role is button, combobox, select, listbox, radio or similar (e.g. a currency selector, a pay-range picker, or a "period" toggle), use click to open it and select/enter per the Comboboxes/Dropdowns rules below — do NOT input_text into it. A salary control that rejects typing as "not editable" is one of these; switch to click, never retype into it.
 
 4.2. **Truthfulness for Constrained Options (conditional)**:
    - Constrained option fields are required questions with a finite set of explicit choices (e.g., radio buttons, dropdown/select, combobox options, multi-select lists).

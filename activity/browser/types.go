@@ -99,6 +99,7 @@ const (
 	CaptchaTypeRecaptchaV2 = "recaptcha_v2"
 	CaptchaTypeRecaptchaV3 = "recaptcha_v3"
 	CaptchaTypeTurnstile   = "turnstile"
+	CaptchaTypeHcaptcha    = "hcaptcha"
 )
 
 type DetectCaptchaInput struct {
@@ -131,4 +132,12 @@ type ClickCaptchaButtonInput struct {
 
 type ClickCaptchaButtonOutput struct {
 	Clicked bool `json:"clicked"`
+}
+
+type ScrapeRenderedPageInput struct {
+	WorkflowID string `json:"workflow_id"`
+}
+
+type ScrapeRenderedPageOutput struct {
+	Data string `json:"data"` // cleaned rendered page text (no markup/CSS/JS)
 }

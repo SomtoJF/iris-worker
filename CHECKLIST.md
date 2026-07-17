@@ -1,11 +1,11 @@
 # TODO list of things that need to be done
 
-- [ x ] Implement user auth backend
-- [ x ] Implement user auth frontend
-- [ x ] Implement resume upload
-- [ x ] Implement File Upload tool
-- [ x ] Implement Cover Letter tool
-- [ x ] Collect more information from the user (onboarding) -- Need:
+- [x] Implement user auth backend
+- [x] Implement user auth frontend
+- [x] Implement resume upload
+- [x] Implement File Upload tool
+- [x] Implement Cover Letter tool
+- [x] Collect more information from the user (onboarding) -- Need:
   - Phone Number
   - Gender
   - Race
@@ -15,17 +15,17 @@
   - Linkedin
   - Country of Residence
   - Citizenships
-- [ x ] Wire in Redis Pub/Sub to worker repo
-- [ x ] Figure out how to detect form/application submissions to end the application process
-- [ x ] Investigate Nil values being passed for combobox inputs when they do have values
-- [ x ] Investigate Nil checkbox inputs
-- [ x ] Design and wire in User Input Required for OTP (greenhouse)
-- [ x ] Wire in cost monitoring
-- [ x ] Migrate to postgres
-- [ x ] Deploy Iris
-- [ x ] Research the best and cheapest google job search tool
-- [ x ] Implement built-in job search
-- [ x ] Collect more onboarding data
+- [x] Wire in Redis Pub/Sub to worker repo
+- [x] Figure out how to detect form/application submissions to end the application process
+- [x] Investigate Nil values being passed for combobox inputs when they do have values
+- [x] Investigate Nil checkbox inputs
+- [x] Design and wire in User Input Required for OTP (greenhouse)
+- [x] Wire in cost monitoring
+- [x] Migrate to postgres
+- [x] Deploy Iris
+- [x] Research the best and cheapest google job search tool
+- [x] Implement built-in job search
+- [x] Collect more onboarding data
   - Are you open to relocating (single select/radio: Yes/No)?
   - Do you have a notice period and if so how long is it?
   - Languages and fluency levels i.e
@@ -39,41 +39,53 @@
     - Remote work
     - Hybrid work (some days remote, some days in-office)
     - Fully in-office
-- [ x ] Wire job search to frontend
-- [ x ] Include location in the serper search query to reinforce the search location
-- [ x ] Integrate Posthog for production logging and error detection on worker repo
-- [ x ] Implement feedback system. Form will have the following fields
+- [x] Wire job search to frontend
+- [x] Include location in the serper search query to reinforce the search location
+- [x] Integrate Posthog for production logging and error detection on worker repo
+- [x] Implement feedback system. Form will have the following fields
   - Title
   - Type - enum (Bug, Feature Request)
   - Job Application (optional - will link the job application to the feedback record)
   - Description
   - Summary (Backend-only LLM generated summary of the feedback data)
   - Upvote
-- [ x ] Sync Job Search with url search params
-- [ x ] Add and Display failure reasons for each application.
-- [ x ] Add linkedin url to application profile
-- [ x ] Increase job application workflow timeout to 6 hours. No timer on user action workflow
-- [ x ] In job search results, distinguish between applied jobs and non applied jobs
-- [ x ] In handle user action, descriptions to the user must not include tags. Must not be more than 3 line long and must be easy to understand.
-- [ x ] Add truthfulness clause to the planner prompt. The LLM must not lie and if the application requires that you provide information that will contradict user provided data, fail it.
-- [ x ] Viewing application data for each application in the frontend
-- [ x ] Implement application cancelation
-- [ x ] Finish All Issues Feed
-- [ x ] Users should be able to delete applications
-- [ x ] Investigate LLM often skips writing coverletters
-- [ x ] Investigate LLM often ignores optional fields
-- [ x ] Improve cover letter writing
-- [ x ] Refactor cover letter tool so it can be used as a standalone feature
-- [ ] Implement status halted for truthfulness clause violations
+- [x] Sync Job Search with url search params
+- [x] Add and Display failure reasons for each application.
+- [x] Add linkedin url to application profile
+- [x] Increase job application workflow timeout to 6 hours. No timer on user action workflow
+- [x] In job search results, distinguish between applied jobs and non applied jobs
+- [x] In handle user action, descriptions to the user must not include tags. Must not be more than 3 line long and must be easy to understand.
+- [x] Add truthfulness clause to the planner prompt. The LLM must not lie and if the application requires that you provide information that will contradict user provided data, fail it.
+- [x] Viewing application data for each application in the frontend
+- [x] Implement application cancelation
+- [x] Finish All Issues Feed
+- [x] Users should be able to delete applications
+- [x] Investigate LLM often skips writing coverletters
+- [x] Investigate LLM often ignores optional fields
+- [x] Improve cover letter writing
+- [x] Refactor cover letter tool so it can be used as a standalone feature
+- [x] Implement status halted for truthfulness clause violations
+
 - [ ] Fix question-answer deduplication
 - [ ] Implement email notifications on successful/failed applications, comments on feedback and user action required. (Mailjet)
-- [ ] Figure out captcha solving
-- [ ] Implement auto-resume suggestion
+- [x] Figure out captcha solving
+  - [x] Turnstile + reCAPTCHA v2/v3 detect + CapSolver solve (working)
+  - [x] hCaptcha detect + inject + buildTask (HCaptchaTaskProxyless — exact lowercase "less") wired end-to-end
+  - [ ] **BLOCKED (account, not code): hCaptcha solving not enabled on the CapSolver account.**
+    - Symptom: worker fails Lever apps with failure_status=CAPTCHA; SolveWithCapSolver → createTask 400
+    `ERROR_INVALID_TASK_DATA` / "We don't support this service. Please contact support..."
+    - Diagnosis: getBalance works ($5.99, key valid); reCAPTCHA type validates sitekey; hCaptcha type is
+    *recognized* but refused ("We don't support this service", and a known-good hCaptcha sitekey returns a
+    usage-policy block) → hCaptcha is a separately-gated service on the plan. Distinct from a bad type name,
+    which returns "This service is not supported: ".
+    - Fix: enable hCaptcha on the CapSolver account (or swap to a key/plan that includes it). No code change.
+    - Detection/inject/mapping already correct in activity/browser/captcha.go + activity/captcha/activity.go.
+- [x] Implement auto-resume suggestion
 - [ ] Re-evaluate submission detection logic. Maybe just have the LLM figure it out. --Wait until the page is stable (network request has been made) and immediately take the screenshot. LLM checks if the form inputs are partially filled (usually means failure) or success messages or if we're on a different page than the application page with the form (like the job description page) or if the new url contains success indicators
 - [ ] Indeed Integration
 - [ ] Make sure Job Search and apply works well for the following job boards:
-  - [ x ] Greenhouse (job-boards.greenhouse.io)
-  - [ ] Lever (jobs.lever.co)
+  - [x] Greenhouse (job-boards.greenhouse.io)
+  - [ ] Lever (jobs.lever.co) — blocked on hCaptcha (CapSolver account doesn't have hCaptcha enabled; see "Figure out captcha solving")
   - [ ] Wellfound (wellfound.com)
   - [ ] Workable (apply.workable.com)
   - [ ] Ashby (jobs.ashbyhq.com)
