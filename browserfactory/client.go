@@ -1,9 +1,12 @@
 package browserfactory
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/SomtoJF/iris-worker/initializers/fs"
 	"github.com/go-rod/rod"
@@ -15,46 +18,87 @@ import (
 const existingSessionPort = "37712" // UserMode default port; connect here if launch fails
 
 type BrowserFactory struct {
-	browser *rod.Browser
-	fs      *fs.TemporaryFileSystem
+	browser  *rod.Browser
+	launcher *launcher.Launcher
+	fs       *fs.TemporaryFileSystem
+	mu       sync.Mutex
 }
 
 // NewBrowserFactory tries to launch a new browser first; on failure it tries to connect
 // to an existing session on port 37712 (e.g. Chrome started with --remote-debugging-port=37712).
 func NewBrowserFactory(fs *fs.TemporaryFileSystem) (*BrowserFactory, error) {
+	browser, l, err := connect()
+	if err != nil {
+		return nil, err
+	}
+	return &BrowserFactory{browser: browser, launcher: l, fs: fs}, nil
+}
+
+// connect launches a fresh browser; on launch failure it falls back to an existing
+// session on port 37712 (launcher is nil in that case).
+func connect() (*rod.Browser, *launcher.Launcher, error) {
 	path, _ := launcher.LookPath()
-	// 1. Try to launch a new browser (default launcher, fresh instance).
-	u, launchErr := launcher.New().
+	l := launcher.New().
 		Bin(path).
 		Set("disable-dev-shm-usage").
 		Set("disable-gpu").
-		NoSandbox(true).
-		Launch()
+		NoSandbox(true)
+	u, launchErr := l.Launch()
 	if launchErr == nil {
 		browser := rod.New().ControlURL(u)
 		if err := browser.Connect(); err != nil {
-			return nil, fmt.Errorf("launched browser but failed to connect: %w", err)
+			return nil, nil, fmt.Errorf("launched browser but failed to connect: %w", err)
 		}
 		slog.Info("Successfully launched browser")
-		return &BrowserFactory{browser: browser.NoDefaultDevice(), fs: fs}, nil
+		return browser.NoDefaultDevice(), l, nil
 	}
 
 	slog.Warn("Failed to launch browser", "error", launchErr)
 
-	// 2. Fallback: connect to existing session (e.g. user started Chrome with --remote-debugging-port=37712).
 	existingURL, resolveErr := launcher.ResolveURL(existingSessionPort)
 	if resolveErr != nil {
-		return nil, fmt.Errorf("failed to launch browser: %w; failed to connect to existing session on port %s: %w", launchErr, existingSessionPort, resolveErr)
+		return nil, nil, fmt.Errorf("failed to launch browser: %w; failed to connect to existing session on port %s: %w", launchErr, existingSessionPort, resolveErr)
 	}
 	browser := rod.New().ControlURL(existingURL)
 	if err := browser.Connect(); err != nil {
-		return nil, fmt.Errorf("failed to launch browser: %w; existing session on port %s unreachable: %w", launchErr, existingSessionPort, err)
+		return nil, nil, fmt.Errorf("failed to launch browser: %w; existing session on port %s unreachable: %w", launchErr, existingSessionPort, err)
 	}
-	return &BrowserFactory{browser: browser.NoDefaultDevice(), fs: fs}, nil
+	return browser.NoDefaultDevice(), nil, nil
 }
 
-func (b *BrowserFactory) GetBrowser() *rod.Browser {
-	return b.browser
+func (b *BrowserFactory) healthy() bool {
+	if b.browser == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err := proto.BrowserGetVersion{}.Call(b.browser.Context(ctx))
+	return err == nil
+}
+
+func (b *BrowserFactory) GetBrowser() (*rod.Browser, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.healthy() {
+		return b.browser, nil
+	}
+
+	if b.browser != nil {
+		_ = b.browser.Close()
+	}
+	if b.launcher != nil {
+		b.launcher.Kill()
+	}
+	slog.Warn("Browser unhealthy, relaunching")
+
+	browser, l, err := connect()
+	if err != nil {
+		return nil, err
+	}
+	b.browser = browser
+	b.launcher = l
+	return b.browser, nil
 }
 
 func (b *BrowserFactory) ScreenshotForLLM(page *rod.Page, fileName string) (string, []*TaggedAccessibilityNode, []*TaggedFileInputNode, error) {

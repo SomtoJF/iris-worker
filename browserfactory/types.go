@@ -6,7 +6,7 @@ import (
 )
 
 type BrowserClient interface {
-	GetBrowser() *rod.Browser
+	GetBrowser() (*rod.Browser, error)
 	ScreenshotForLLM(*rod.Page, string) (string, []*TaggedAccessibilityNode, []*TaggedFileInputNode, error)
 	OpenPageNewTab(browser *rod.Browser, url string) *rod.Page
 }

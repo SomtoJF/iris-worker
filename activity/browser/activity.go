@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -40,7 +41,11 @@ func (a *Activity) OpenWebpage(ctx context.Context, input OpenWebpageInput) erro
 
 	incognitoCtx, exists := a.incognitoContexts[input.WorkflowID]
 	if !exists {
-		incognitoCtx = a.browserFactory.GetBrowser().MustIncognito()
+		browser, err := a.browserFactory.GetBrowser()
+		if err != nil {
+			return fmt.Errorf("browser unavailable: %w", err)
+		}
+		incognitoCtx = browser.MustIncognito()
 		a.incognitoContexts[input.WorkflowID] = incognitoCtx
 	}
 
@@ -422,31 +427,25 @@ func (a *Activity) Navigate(ctx context.Context, input NavigateInput) error {
 
 func (a *Activity) ClosePage(ctx context.Context, input ClosePageInput) error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
 	page, pageExists := a.activeSessions[input.WorkflowID]
 	incognitoCtx, ctxExists := a.incognitoContexts[input.WorkflowID]
-
-	if pageExists {
-		delete(a.activeSessions, input.WorkflowID)
-	}
-	if ctxExists {
-		delete(a.incognitoContexts, input.WorkflowID)
-	}
+	delete(a.activeSessions, input.WorkflowID)
+	delete(a.incognitoContexts, input.WorkflowID)
 	delete(a.lastTaggedNodes, input.WorkflowID)
 	delete(a.lastTaggedFileInputs, input.WorkflowID)
+	a.mu.Unlock()
 
 	if !pageExists {
 		return fmt.Errorf("no active page for workflow %s", input.WorkflowID)
 	}
 
+	// Best-effort: a hung CDP socket must not block other activities.
 	if err := page.Close(); err != nil {
-		return fmt.Errorf("failed to close page: %w", err)
+		slog.Warn("failed to close page", "workflowID", input.WorkflowID, "error", err)
 	}
-
 	if ctxExists {
 		if err := incognitoCtx.Close(); err != nil {
-			return fmt.Errorf("failed to close incognito context: %w", err)
+			slog.Warn("failed to close incognito context", "workflowID", input.WorkflowID, "error", err)
 		}
 	}
 
