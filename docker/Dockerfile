@@ -20,15 +20,15 @@ RUN go build -mod=vendor -o /out/iris-worker main.go
 
 FROM debian:bookworm-slim
 
-# Chromium pinned to 147: Debian's 150.0.7871.46 security update crashes with
-# SIGTRAP on startup in headless/container mode (reproduced on arm64 + amd64).
-# Re-test before unpinning: chromium --headless --no-sandbox --dump-dom about:blank
-ARG CHROMIUM_VERSION=147.0.7727.137-1~deb12u1
+# Unpinned: Debian drops superseded versions from the repo, so pinning breaks builds
+# on every chromium security update (147 pin failed 2026-07). The 150.0.7871.46 SIGTRAP
+# crash is fixed in 150.0.7871.100 (verified headless in bookworm-slim container).
+# If a future version crashes: chromium --headless --no-sandbox --dump-dom about:blank
 RUN apt-get update && apt-get install -y --no-install-recommends \
 	ca-certificates \
-	chromium=${CHROMIUM_VERSION} \
-	chromium-common=${CHROMIUM_VERSION} \
-	chromium-sandbox=${CHROMIUM_VERSION} \
+	chromium \
+	chromium-common \
+	chromium-sandbox \
 	fonts-liberation \
 	libasound2 \
 	libatk-bridge2.0-0 \
