@@ -510,7 +510,7 @@ func retrieveJobDetails(ctx workflow.Context, workflowID string, url string, idU
 		return JobDetails{}, err
 	}
 
-	systemPrompt := "Extract the job title, company name, and job description from the provided scraped webpage content. Return the data in JSON format. Most job descriptions have a 'Who we are' or 'About us' or 'Company Description' section that contains the company's details. This is where you should look for the company name. If this page doesn't include the job description, It is invalid and you should set is_valid_job_posting to false. For invalid job postings, return an empty string for the job description, job title, and company name."
+	systemPrompt := "Extract the job title, company name, and job description from the provided scraped webpage content. Return the data in JSON format. Most job descriptions have a 'Who we are' or 'About us' or 'Company Description' section that contains the company's details. This is where you should look for the company name. The job description should be returned in its entirety and formatted in markdown. If this page doesn't include the job description, It is invalid and you should set is_valid_job_posting to false. For invalid job postings, return an empty string for the job description, job title, and company name."
 	userPrompt := fmt.Sprintf("Scraped content:\n\n%s", pageText)
 
 	llmRequest := types.AIPIRequest{

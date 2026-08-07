@@ -9,12 +9,18 @@ import (
 type JobApplicationStatus string
 
 const (
-	JobApplicationStatusPending   JobApplicationStatus = "processing"
-	JobApplicationStatusApplied   JobApplicationStatus = "applied"
-	JobApplicationStatusFailed    JobApplicationStatus = "failed"
-	JobApplicationStatusBlocked   JobApplicationStatus = "blocked"
+	// currently processing the job application
+	JobApplicationStatusPending JobApplicationStatus = "processing"
+	// successfully applied to the job
+	JobApplicationStatusApplied JobApplicationStatus = "applied"
+	// failed to apply to the job
+	JobApplicationStatusFailed JobApplicationStatus = "failed"
+	// user needs to perform an action to continue the job application
+	JobApplicationStatusBlocked JobApplicationStatus = "blocked"
+	// cancelled by the user
 	JobApplicationStatusCancelled JobApplicationStatus = "cancelled"
-	JobApplicationStatusHalted    JobApplicationStatus = "halted"
+	// job application was halted by the system for ethical reasons
+	JobApplicationStatusHalted JobApplicationStatus = "halted"
 )
 
 type JobApplication struct {

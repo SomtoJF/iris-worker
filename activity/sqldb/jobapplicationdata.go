@@ -61,7 +61,7 @@ type JobApplicationData struct {
 	JobApplicationId     uint                    `gorm:"column:id_job_application;not null"`
 	JobApplication       JobApplication          `gorm:"foreignKey:JobApplicationId;references:IdJobApplication"`
 	CoverLetter          *string                 `gorm:"type:text"`
-	Questions            JobApplicationQuestions  `gorm:"type:jsonb;not null"`
+	Questions            JobApplicationQuestions `gorm:"type:jsonb;not null"`
 	CreatedAt            time.Time               `gorm:"default:CURRENT_TIMESTAMP"`
 	UpdatedAt            time.Time               `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime"`
 }
@@ -73,9 +73,9 @@ func (JobApplicationData) TableName() string {
 // ====== ACTIVITY ======
 
 type CreateJobApplicationDataInput struct {
-	IdUser           uint                    `json:"id_user"`
-	IdJobApplication uint                    `json:"id_job_application"`
-	CoverLetter      *string                 `json:"cover_letter"`
+	IdUser           uint                     `json:"id_user"`
+	IdJobApplication uint                     `json:"id_job_application"`
+	CoverLetter      *string                  `json:"cover_letter"`
 	Questions        []JobApplicationQuestion `json:"questions"`
 }
 
