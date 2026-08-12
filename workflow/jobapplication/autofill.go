@@ -29,6 +29,7 @@ type AutofillApplicationWorkflowInput struct {
 	IdUser           uint               `json:"id_user"`
 	IdJobApplication uint               `json:"id_job_application"`
 	Questions        []AutofillQuestion `json:"questions"`
+	ContextUrls      []string           `json:"context_urls"`
 }
 
 type AutofillApplicationWorkflowResponse struct {
