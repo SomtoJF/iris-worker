@@ -62,6 +62,7 @@ func main() {
 
 func registerJobApplicationWorkflows(w worker.Worker) {
 	w.RegisterWorkflow(jobapplication.JobApplicationWorkflow)
+	w.RegisterWorkflow(jobapplication.AutofillApplicationWorkflow)
 	w.RegisterWorkflow(jobapplication.InitiateApplicationWorkflow)
 	w.RegisterWorkflow(processresume.ProcessResumeWorkflow)
 	w.RegisterWorkflow(coverletter.CoverLetterWorkflow)

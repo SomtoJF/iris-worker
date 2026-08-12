@@ -1,0 +1,36 @@
+<task>
+Answer the job application questions for the posting at: {{.JobPostingUrl}}
+</task>
+
+<current_date>{{.CurrentDate}}</current_date>
+
+<job_context>
+  <job_posting_url>{{.JobPostingUrl}}</job_posting_url>
+  <job_title>{{.JobTitle}}</job_title>
+  <company_name>{{.CompanyName}}</company_name>
+  <job_description>
+{{.JobDescription}}
+  </job_description>
+</job_context>
+
+<candidate>
+  <candidate_profile>
+{{.UserProfileJSON}}
+  </candidate_profile>
+
+  <candidate_resume>
+{{.UserResume}}
+  </candidate_resume>
+</candidate>
+
+<existing_application_answers>
+{{.ExistingApplicationAnswers}}
+</existing_application_answers>
+
+<questions_to_answer>
+{{.QuestionsJSON}}
+</questions_to_answer>
+
+<instructions>
+Answer every question in <questions_to_answer>. Echo each id unchanged. Use the candidate profile, resume, existing answers, and job context. For motivation/fit questions, write a concise grounded answer. If a factual question cannot be answered truthfully from the provided data, return an empty answer string for that question. Respond with the required JSON format.
+</instructions>
