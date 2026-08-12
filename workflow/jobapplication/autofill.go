@@ -14,12 +14,12 @@ import (
 )
 
 type AutofillQuestion struct {
-	Id       uint   `json:"id"`
+	Id       string `json:"id"`
 	Question string `json:"question"`
 }
 
 type AutofillAnsweredQuestion struct {
-	Id       uint   `json:"id"`
+	Id       string `json:"id"`
 	Question string `json:"question"`
 	Answer   string `json:"answer"`
 }
@@ -175,7 +175,7 @@ func callAutofillLLM(ctx workflow.Context, systemPrompt, userPrompt string, idUs
 }
 
 func mergeAutofillAnswers(input []AutofillQuestion, answered []AutofillAnsweredQuestion) []AutofillAnsweredQuestion {
-	byID := make(map[uint]AutofillAnsweredQuestion, len(answered))
+	byID := make(map[string]AutofillAnsweredQuestion, len(answered))
 	for _, q := range answered {
 		byID[q.Id] = q
 	}
@@ -210,7 +210,7 @@ func getAutofillResponseSchema() map[string]interface{} {
 					"type": "object",
 					"properties": map[string]interface{}{
 						"id": map[string]interface{}{
-							"type":        "integer",
+							"type":        "string",
 							"description": "The original question id from the input; must be echoed unchanged",
 						},
 						"question": map[string]interface{}{
