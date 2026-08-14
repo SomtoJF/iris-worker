@@ -26,11 +26,22 @@ Answer the job application questions for the posting at: {{.JobPostingUrl}}
 <existing_application_answers>
 {{.ExistingApplicationAnswers}}
 </existing_application_answers>
-
+{{if .PagesContext}}
+<pages_context>
+  {{range .PagesContext}}
+  <page>
+    <url>{{.Url}}</url>
+    <content>
+{{.Content}}
+    </content>
+  </page>
+  {{end}}
+</pages_context>
+{{end}}
 <questions_to_answer>
 {{.QuestionsJSON}}
 </questions_to_answer>
 
 <instructions>
-Answer every question in <questions_to_answer>. Echo each id unchanged. Use the candidate profile, resume, existing answers, and job context. For motivation/fit questions, write a concise grounded answer. If a factual question cannot be answered truthfully from the provided data, return an empty answer string for that question. Respond with the required JSON format.
+Answer every question in <questions_to_answer>. Echo each id unchanged. Use the candidate profile, resume, existing answers, job context, and <pages_context> when present. For motivation/fit questions, write a grounded answer that can subtly weave overlap between the company pages, job description, and resume. Prefer a short plain explanation over jargon; give a detailed answer only when the question asks for detail. If a factual question cannot be answered truthfully from the provided data, return an empty answer string for that question. Respond with the required JSON format.
 </instructions>

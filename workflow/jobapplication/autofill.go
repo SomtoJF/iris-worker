@@ -4,14 +4,18 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"text/template"
 	"time"
 
 	"github.com/SomtoJF/iris-worker/activity/sqldb"
+	"github.com/SomtoJF/iris-worker/activity/web"
 	"github.com/SomtoJF/iris-worker/aipi/types"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
+
+const maxAutofillPageContentLen = 3000
 
 type AutofillQuestion struct {
 	Id       string `json:"id"`
@@ -32,20 +36,26 @@ type AutofillApplicationWorkflowInput struct {
 	ContextUrls      []string           `json:"context_urls"`
 }
 
+type AutofillPageContext struct {
+	Url     string `json:"url"`
+	Content string `json:"content"`
+}
+
 type AutofillApplicationWorkflowResponse struct {
 	Questions []AutofillAnsweredQuestion `json:"questions"`
 }
 
 type autofillPromptData struct {
-	CurrentDate                string
-	JobPostingUrl              string
-	JobTitle                   string
-	CompanyName                string
-	JobDescription             string
-	UserProfileJSON            string
-	UserResume                 string
-	ExistingApplicationAnswers string
-	QuestionsJSON              string
+	CurrentDate                string                `json:"current_date"`
+	JobPostingUrl              string                `json:"job_posting_url"`
+	JobTitle                   string                `json:"job_title"`
+	CompanyName                string                `json:"company_name"`
+	JobDescription             string                `json:"job_description"`
+	UserProfileJSON            string                `json:"user_profile_json"`
+	UserResume                 string                `json:"user_resume"`
+	ExistingApplicationAnswers string                `json:"existing_application_answers"`
+	QuestionsJSON              string                `json:"questions_json"`
+	PagesContext               []AutofillPageContext `json:"pages_context"`
 }
 
 type autofillLLMResponse struct {
@@ -70,26 +80,36 @@ func AutofillApplicationWorkflow(ctx workflow.Context, input AutofillApplication
 		return AutofillApplicationWorkflowResponse{Questions: []AutofillAnsweredQuestion{}}, nil
 	}
 
+	var pagesContext []AutofillPageContext
+	if len(input.ContextUrls) > 0 {
+		pagesContext = fetchPagesContext(ctx, input.ContextUrls, input.IdUser, input.IdJobApplication)
+		logger.Info("fetched pages context", "pages", len(pagesContext))
+	}
+
 	var jobApp sqldb.JobApplication
 	if err := workflow.ExecuteActivity(ctx, "GetJobApplication", sqldb.GetJobApplicationInput{
 		IdJobApplication:          input.IdJobApplication,
 		IncludeJobApplicationData: true,
 	}).Get(ctx, &jobApp); err != nil {
+		logger.Error("Failed to get job application", "error", err)
 		return AutofillApplicationWorkflowResponse{}, fmt.Errorf("get job application: %w", err)
 	}
 
 	var resume sqldb.Resume
 	if err := workflow.ExecuteActivity(ctx, "GetResumeByID", jobApp.ResumeId).Get(ctx, &resume); err != nil {
+		logger.Error("Failed to get resume", "error", err)
 		return AutofillApplicationWorkflowResponse{}, fmt.Errorf("get resume: %w", err)
 	}
 
 	userProfile, err := fetchJobApplicationProfile(ctx, input.IdUser)
 	if err != nil {
+		logger.Error("Failed to fetch job application profile", "error", err)
 		return AutofillApplicationWorkflowResponse{}, fmt.Errorf("fetch job application profile: %w", err)
 	}
 
 	userProfileJSON, err := json.Marshal(userProfile)
 	if err != nil {
+		logger.Error("Failed to marshal user profile", "error", err)
 		return AutofillApplicationWorkflowResponse{}, fmt.Errorf("marshal user profile: %w", err)
 	}
 
@@ -97,6 +117,7 @@ func AutofillApplicationWorkflow(ctx workflow.Context, input AutofillApplication
 	if jobApp.JobApplicationData != nil && len(jobApp.JobApplicationData.Questions) > 0 {
 		b, err := json.Marshal(jobApp.JobApplicationData.Questions)
 		if err != nil {
+			logger.Error("Failed to marshal existing answers", "error", err)
 			return AutofillApplicationWorkflowResponse{}, fmt.Errorf("marshal existing answers: %w", err)
 		}
 		existingAnswersJSON = string(b)
@@ -104,6 +125,7 @@ func AutofillApplicationWorkflow(ctx workflow.Context, input AutofillApplication
 
 	questionsJSON, err := json.Marshal(input.Questions)
 	if err != nil {
+		logger.Error("Failed to marshal questions", "error", err)
 		return AutofillApplicationWorkflowResponse{}, fmt.Errorf("marshal questions: %w", err)
 	}
 
@@ -122,24 +144,30 @@ func AutofillApplicationWorkflow(ctx workflow.Context, input AutofillApplication
 		UserResume:                 resume.Content,
 		ExistingApplicationAnswers: existingAnswersJSON,
 		QuestionsJSON:              string(questionsJSON),
+		PagesContext:               pagesContext,
 	}
 
 	systemPrompt, err := executeAutofillTemplate(Templates.Autofill.System, promptData)
 	if err != nil {
+		logger.Error("Failed to render autofill system prompt", "error", err)
 		return AutofillApplicationWorkflowResponse{}, fmt.Errorf("render autofill system prompt: %w", err)
 	}
 	userPrompt, err := executeAutofillTemplate(Templates.Autofill.User, promptData)
 	if err != nil {
+		logger.Error("Failed to render autofill user prompt", "error", err)
 		return AutofillApplicationWorkflowResponse{}, fmt.Errorf("render autofill user prompt: %w", err)
 	}
 
 	answered, err := callAutofillLLM(ctx, systemPrompt, userPrompt, input.IdUser, input.IdJobApplication)
 	if err != nil {
+		logger.Error("Failed to call autofill LLM", "error", err)
 		return AutofillApplicationWorkflowResponse{}, err
 	}
 
+	merged := mergeAutofillAnswers(input.Questions, answered)
+	logger.Info("AutofillApplicationWorkflow completed", "questions", len(merged))
 	return AutofillApplicationWorkflowResponse{
-		Questions: mergeAutofillAnswers(input.Questions, answered),
+		Questions: merged,
 	}, nil
 }
 
@@ -229,4 +257,63 @@ func getAutofillResponseSchema() map[string]interface{} {
 		},
 		"required": []string{"questions"},
 	}
+}
+
+type indexedAutofillPage struct {
+	Index   int
+	Context AutofillPageContext
+}
+
+func fetchPagesContext(ctx workflow.Context, urls []string, idUser, idJobApplication uint) []AutofillPageContext {
+	logger := workflow.GetLogger(ctx)
+	n := len(urls)
+	if n == 0 {
+		return nil
+	}
+
+	ch := workflow.NewBufferedChannel(ctx, n)
+	for i, u := range urls {
+		i, u := i, u
+		workflow.Go(ctx, func(gctx workflow.Context) {
+			in := web.ScrapeWebPageInput{
+				Url:              u,
+				IdUser:           idUser,
+				IdJobApplication: &idJobApplication,
+				Advanced:         false,
+			}
+			var out web.ScrapeWebPageOutput
+			err := workflow.ExecuteActivity(gctx, "ScrapeWebPage", in).Get(gctx, &out)
+
+			page := AutofillPageContext{Url: u}
+			if err != nil {
+				logger.Warn("ScrapeWebPage failed", "url", u, "error", err)
+			} else {
+				content := strings.TrimSpace(out.Data)
+				if content == "" {
+					logger.Warn("ScrapeWebPage returned empty data", "url", u)
+				} else {
+					if len(content) > maxAutofillPageContentLen {
+						content = content[:maxAutofillPageContentLen]
+					}
+					page.Content = content
+				}
+			}
+			ch.Send(gctx, indexedAutofillPage{Index: i, Context: page})
+		})
+	}
+
+	pages := make([]AutofillPageContext, n)
+	for range urls {
+		var slot indexedAutofillPage
+		ch.Receive(ctx, &slot)
+		pages[slot.Index] = slot.Context
+	}
+
+	var nonEmpty []AutofillPageContext
+	for _, p := range pages {
+		if p.Content != "" {
+			nonEmpty = append(nonEmpty, p)
+		}
+	}
+	return nonEmpty
 }
