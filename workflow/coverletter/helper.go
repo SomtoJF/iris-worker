@@ -573,14 +573,18 @@ func getCoverLetterResponseSchema() map[string]interface{} {
 			},
 			"summary_statement": map[string]interface{}{
 				"type":        "string",
-				"description": "One quantified sentence: candidate's top accomplishment + what they bring.",
+				"description": "One quantified sentence: candidate's top accomplishment + what they bring. Must be distinct from the opener.",
+			},
+			"opener": map[string]interface{}{
+				"type":        "string",
+				"description": "First 1-2 sentences of the letter, filled from the opener bank (style A, B, C, or D). The cover letter must start with this opener.",
 			},
 			"cover_letter": map[string]interface{}{
 				"type":        "string",
-				"description": "The complete cover letter. Exactly 3 paragraphs separated by one blank line. Max 450 words.",
+				"description": "The complete cover letter. Exactly 3 paragraphs separated by one blank line. Max 450 words. Must start with the opener.",
 			},
 		},
-		"required": []string{"tasks_or_skills", "qualification_matches", "company_reasons", "summary_statement", "cover_letter"},
+		"required": []string{"tasks_or_skills", "qualification_matches", "company_reasons", "summary_statement", "opener", "cover_letter"},
 	}
 }
 

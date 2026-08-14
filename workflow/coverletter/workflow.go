@@ -77,6 +77,7 @@ type coverLetterLLMResponse struct {
 	QualificationMatches []qualificationMatch `json:"qualification_matches"`
 	CompanyReasons       []string             `json:"company_reasons"`
 	SummaryStatement     string               `json:"summary_statement"`
+	Opener               string               `json:"opener"`
 	CoverLetter          string               `json:"cover_letter"`
 }
 
