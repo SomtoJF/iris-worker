@@ -10,7 +10,7 @@ type JobApplicationStatus string
 
 const (
 	// currently processing the job application
-	JobApplicationStatusPending JobApplicationStatus = "processing"
+	JobApplicationStatusProcessing JobApplicationStatus = "processing"
 	// successfully applied to the job
 	JobApplicationStatusApplied JobApplicationStatus = "applied"
 	// failed to apply to the job
@@ -42,6 +42,7 @@ type JobApplication struct {
 	JobDescription     string     `gorm:"type:text;not null"`
 	Url                string     `gorm:"not null"`
 	CoverLetterOnly    bool       `gorm:"default:false"`
+	AppliedAt          *time.Time `gorm:"default:NULL"`
 	CreatedAt          time.Time  `gorm:"default:CURRENT_TIMESTAMP"`
 	UpdatedAt          time.Time  `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime"`
 	DeletedAt          *time.Time `gorm:"index;default:NULL"`

@@ -24,12 +24,12 @@ type JobApplication = model.JobApplication
 type JobApplicationStatus = model.JobApplicationStatus
 
 const (
-	JobApplicationStatusPending   = model.JobApplicationStatusPending
-	JobApplicationStatusApplied   = model.JobApplicationStatusApplied
-	JobApplicationStatusFailed    = model.JobApplicationStatusFailed
-	JobApplicationStatusBlocked   = model.JobApplicationStatusBlocked
-	JobApplicationStatusCancelled = model.JobApplicationStatusCancelled
-	JobApplicationStatusHalted    = model.JobApplicationStatusHalted
+	JobApplicationStatusProcessing = model.JobApplicationStatusProcessing
+	JobApplicationStatusApplied    = model.JobApplicationStatusApplied
+	JobApplicationStatusFailed     = model.JobApplicationStatusFailed
+	JobApplicationStatusBlocked    = model.JobApplicationStatusBlocked
+	JobApplicationStatusCancelled  = model.JobApplicationStatusCancelled
+	JobApplicationStatusHalted     = model.JobApplicationStatusHalted
 )
 
 func (a *Activity) UpdateJobApplication(ctx context.Context, input UpdateJobApplicationInput) error {

@@ -493,6 +493,11 @@ func updateJobApplicationStatus(ctx workflow.Context, idJobApplication uint, sta
 	data := map[string]interface{}{
 		"status": status,
 	}
+
+	if status == sqldb.JobApplicationStatusApplied {
+		data["applied_at"] = workflow.Now(ctx).Format("2006-01-02")
+	}
+
 	if status == sqldb.JobApplicationStatusHalted {
 		data["halt_reason"] = reason
 	} else {

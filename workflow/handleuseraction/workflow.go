@@ -136,7 +136,7 @@ func HandleUserActionWorkflow(ctx workflow.Context, input HandleUserActionWorkfl
 	}
 
 	// Restore job application status to processing
-	if err := updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusPending); err != nil {
+	if err := updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusProcessing); err != nil {
 		logger.Error("Failed to restore job application status", "error", err)
 	}
 
