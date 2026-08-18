@@ -2,8 +2,10 @@
 
 ## Urgent
 
-- [ ] Add chrome extension link to the marketing page and client dash
-- [ ] Add name field to resumes
+- [x] Add chrome extension link to the marketing page and client dash
+- [x] Add name field to resumes
+- [ ] View resumes by display name in extension
+- [ ] Page changes within the same tab shouldnt clear extension scan memory
 - [ ] Disable automated apply to every job that is not from greenhouse
 
 ## Others
