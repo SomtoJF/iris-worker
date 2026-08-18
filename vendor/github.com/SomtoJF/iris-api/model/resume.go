@@ -12,6 +12,7 @@ type Resume struct {
 	// Either url of filepath
 	UserId       uint       `gorm:"column:id_user;not null"`
 	User         User       `gorm:"foreignKey:UserId;references:IdUser"`
+	DisplayName  *string    `gorm:"default:NULL" json:"displayName,omitempty"`
 	FileKey      string     `gorm:"not null"`
 	FileName     string     `gorm:"not null"`
 	FileSize     int64      `gorm:"not null"`
