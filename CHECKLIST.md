@@ -6,7 +6,9 @@
 - [x] Add name field to resumes
 - [ ] View resumes by display name in extension
 - [ ] Page changes within the same tab shouldnt clear extension scan memory
-- [ ] Disable automated apply to every job that is not from greenhouse
+- [ ] Cant scan this page [https://www.riskified.com/job-description/?gh_jid=8635191002#apply](https://www.riskified.com/job-description/?gh_jid=8635191002#apply)
+- [ ] Clicking an application in the extension shouldn't automatically navigate to the application. Add a "to application" link for every application item.
+- [x] Disable automated apply to every job that is not from greenhouse
 
 ## Others
 

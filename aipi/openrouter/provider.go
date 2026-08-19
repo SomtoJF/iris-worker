@@ -146,7 +146,7 @@ func getModelRates(model string) modelRates {
 		"deepseek/deepseek-chat":                       {inputRate: 0.14, outputRate: 0.28},
 		"deepseek/deepseek-r1":                         {inputRate: 0.55, outputRate: 2.19},
 		"deepseek/deepseek-r1-distill-llama-70b":       {inputRate: 0.55, outputRate: 2.19},
-		"deepseek/deepseek-v4-flash":                   {inputRate: 0.09, outputRate: 0.18},
+		"deepseek/deepseek-v4-flash":                   {inputRate: 0.07, outputRate: 0.17},
 		"deepseek/deepseek-v4-pro":                     {inputRate: 0.435, outputRate: 0.87},
 		"google/gemini-2.0-flash-lite":                 {inputRate: 0.075, outputRate: 0.30},
 		"google/gemini-2.5-flash-lite-preview-09-2025": {inputRate: 0.10, outputRate: 0.40},

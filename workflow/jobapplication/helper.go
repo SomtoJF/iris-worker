@@ -528,7 +528,7 @@ func extractJobDetailsFromText(ctx workflow.Context, pageText string, idUser uin
 	llmRequest := types.AIPIRequest{
 		SystemMessage:    systemPrompt,
 		UserMessage:      userPrompt,
-		Model:            "google/gemma-4-31b-it:free",
+		Model:            "deepseek/deepseek-v4-flash",
 		ResponseSchema:   getJobDetailsResponseSchema(),
 		IdUser:           idUser,
 		IdJobApplication: &idJobApplication,
