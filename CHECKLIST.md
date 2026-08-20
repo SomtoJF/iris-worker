@@ -4,10 +4,12 @@
 
 - [x] Add chrome extension link to the marketing page and client dash
 - [x] Add name field to resumes
-- [ ] View resumes by display name in extension
-- [ ] Page changes within the same tab shouldnt clear extension scan memory
-- [ ] Cant scan this page [https://www.riskified.com/job-description/?gh_jid=8635191002#apply](https://www.riskified.com/job-description/?gh_jid=8635191002#apply)
+- [x] View resumes by display name in extension
+- [x] Page changes within the same tab shouldnt clear extension scan memory
+- [ ] Cant scan this page. Basically anypage where greenhouse is embedded into the actual company's site, we can't scan [https://www.riskified.com/job-description/?gh_jid=8635191002#apply](https://www.riskified.com/job-description/?gh_jid=8635191002#apply)
 - [ ] Clicking an application in the extension shouldn't automatically navigate to the application. Add a "to application" link for every application item.
+- [ ] Add functionality to generate cover letter straight from extension
+- [ ] Store cover letter in it's own model
 - [x] Disable automated apply to every job that is not from greenhouse
 
 ## Others

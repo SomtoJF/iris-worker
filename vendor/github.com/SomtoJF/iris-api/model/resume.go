@@ -18,7 +18,7 @@ type Resume struct {
 	FileSize     int64      `gorm:"not null"`
 	Content      string     `gorm:"not null"`
 	IsProcessing bool       `gorm:"default:true"`
-	IsActive     bool       `gorm:"default:true"`
+	IsActive     bool       `gorm:"default:false"`
 	CreatedAt    time.Time  `gorm:"default:CURRENT_TIMESTAMP"`
 	UpdatedAt    time.Time  `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime"`
 	DeletedAt    *time.Time `gorm:"index;default:NULL"`
