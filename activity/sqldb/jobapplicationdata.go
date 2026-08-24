@@ -83,7 +83,7 @@ func (a *Activity) CreateJobApplicationData(ctx context.Context, input CreateJob
 	data := JobApplicationData{
 		UserId:           input.IdUser,
 		JobApplicationId: input.IdJobApplication,
-		CoverLetter:      input.CoverLetter,
+		CoverLetter:      nil,
 		Questions:        JobApplicationQuestions(input.Questions),
 	}
 	return a.db.Create(&data).Error

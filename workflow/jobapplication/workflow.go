@@ -193,8 +193,14 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		}
 	}
 
-	if err := saveApplicationData(ctx, input.IdUser, input.IdJobApplication, execResult.CoverLetter, questions); err != nil {
+	if err := saveApplicationData(ctx, input.IdUser, input.IdJobApplication, questions); err != nil {
 		logger.Error("Failed to save application data", "error", err)
+	}
+
+	if execResult.CoverLetter != nil && *execResult.CoverLetter != "" {
+		if err := upsertCoverLetter(ctx, input, jobDetails, *execResult.CoverLetter); err != nil {
+			logger.Error("Failed to save cover letter", "error", err)
+		}
 	}
 
 	return nil
@@ -507,12 +513,25 @@ func mapToQuestions(qaMap map[string]string) []sqldb.JobApplicationQuestion {
 	return questions
 }
 
-func saveApplicationData(ctx workflow.Context, idUser, idJobApplication uint, coverLetter *string, questions []sqldb.JobApplicationQuestion) error {
+func saveApplicationData(ctx workflow.Context, idUser, idJobApplication uint, questions []sqldb.JobApplicationQuestion) error {
 	return workflow.ExecuteActivity(ctx, "CreateJobApplicationData", sqldb.CreateJobApplicationDataInput{
 		IdUser:           idUser,
 		IdJobApplication: idJobApplication,
-		CoverLetter:      coverLetter,
 		Questions:        questions,
+	}).Get(ctx, nil)
+}
+
+func upsertCoverLetter(ctx workflow.Context, input JobApplicationWorkflowInput, jobDetails JobDetails, body string) error {
+	return workflow.ExecuteActivity(ctx, "UpsertCoverLetter", sqldb.UpsertCoverLetterInput{
+		IdUser:           input.IdUser,
+		IdJobApplication: input.IdJobApplication,
+		IdResume:         input.IdResume,
+		JobTitle:         jobDetails.JobTitle,
+		CompanyName:      jobDetails.CompanyName,
+		JobDescription:   jobDetails.JobDescription,
+		Url:              input.Url,
+		Body:             body,
+		Status:           sqldb.CoverLetterStatusReady,
 	}).Get(ctx, nil)
 }
 

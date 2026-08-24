@@ -31,6 +31,7 @@ type JobApplication struct {
 	ResumeId           uint                 `gorm:"column:id_resume;not null"`
 	Resume             Resume               `gorm:"foreignKey:ResumeId;references:IdResume"`
 	JobApplicationData *JobApplicationData  `gorm:"foreignKey:JobApplicationId;references:IdJobApplication"`
+	CoverLetter        *CoverLetter         `gorm:"foreignKey:JobApplicationId;references:IdJobApplication"`
 	Status             JobApplicationStatus `gorm:"type:varchar(50);not null;index"`
 	WorkflowID         *string              `gorm:"type:text;default:NULL"`
 
@@ -41,7 +42,6 @@ type JobApplication struct {
 	CompanyName        string     `gorm:"type:varchar(255);not null"`
 	JobDescription     string     `gorm:"type:text;not null"`
 	Url                string     `gorm:"not null"`
-	CoverLetterOnly    bool       `gorm:"default:false"`
 	AppliedAt          *time.Time `gorm:"default:NULL"`
 	CreatedAt          time.Time  `gorm:"default:CURRENT_TIMESTAMP"`
 	UpdatedAt          time.Time  `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime"`

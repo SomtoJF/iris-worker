@@ -25,7 +25,8 @@ type TemplateSet struct {
 var Templates TemplateSet
 
 type CoverLetterWorkflowInput struct {
-	IdJobApplication uint              `json:"id_job_application"`
+	IdCoverLetter    uint              `json:"id_cover_letter"`
+	IdJobApplication *uint             `json:"id_job_application,omitempty"`
 	IdUser           uint              `json:"id_user"`
 	WorkflowID       *string           `json:"workflow_id,omitempty"`
 	ElementIndex     *int              `json:"element_index,omitempty"`
@@ -151,14 +152,14 @@ func CoverLetterWorkflow(ctx workflow.Context, input CoverLetterWorkflowInput) (
 func generateCoverLetterForInput(ctx workflow.Context, input CoverLetterWorkflowInput, data coverLetterFetchedData, isFullAnalysis bool) (coverLetterLLMResponse, error) {
 	if isFullAnalysis {
 		companyPages := gatherCompanyInfo(ctx,
-			strings.TrimSpace(data.JobApplication.CompanyName),
-			strings.TrimSpace(data.JobApplication.JobDescription),
+			strings.TrimSpace(data.CompanyName),
+			strings.TrimSpace(data.JobDescription),
 			input.IdUser, input.IdJobApplication)
 		return generateCoverLetterFromData(ctx, input, data, companyPages)
 	}
 
 	if data.CurrentCoverLetter == nil || strings.TrimSpace(*data.CurrentCoverLetter) == "" {
-		return coverLetterLLMResponse{}, fmt.Errorf("cannot edit: no existing cover letter for job application %d", input.IdJobApplication)
+		return coverLetterLLMResponse{}, fmt.Errorf("cannot edit: no existing cover letter")
 	}
 
 	return generateEditedCoverLetter(ctx, input, data)
@@ -166,9 +167,9 @@ func generateCoverLetterForInput(ctx workflow.Context, input CoverLetterWorkflow
 
 func generateEditedCoverLetter(ctx workflow.Context, input CoverLetterWorkflowInput, data coverLetterFetchedData) (coverLetterLLMResponse, error) {
 	promptData := editCoverLetterPromptData{
-		CompanyName:        strings.TrimSpace(data.JobApplication.CompanyName),
-		JobTitle:           strings.TrimSpace(data.JobApplication.JobTitle),
-		JobDescription:     strings.TrimSpace(data.JobApplication.JobDescription),
+		CompanyName:        strings.TrimSpace(data.CompanyName),
+		JobTitle:           strings.TrimSpace(data.JobTitle),
+		JobDescription:     strings.TrimSpace(data.JobDescription),
 		CandidateResume:    strings.TrimSpace(data.Resume.Content),
 		CurrentCoverLetter: strings.TrimSpace(*data.CurrentCoverLetter),
 		EditInstructions:   strings.TrimSpace(input.EditInstructions.Instructions),
@@ -189,10 +190,10 @@ func generateEditedCoverLetter(ctx workflow.Context, input CoverLetterWorkflowIn
 func generateCoverLetterFromData(ctx workflow.Context, input CoverLetterWorkflowInput, data coverLetterFetchedData, companyPages []sqldb.WebsiteCachePage) (coverLetterLLMResponse, error) {
 	promptData := coverLetterPromptData{
 		IdUser:           input.IdUser,
-		IdJobApplication: input.IdJobApplication,
-		CompanyName:      strings.TrimSpace(data.JobApplication.CompanyName),
-		JobTitle:         strings.TrimSpace(data.JobApplication.JobTitle),
-		JobDescription:   strings.TrimSpace(data.JobApplication.JobDescription),
+		IdJobApplication: derefUint(input.IdJobApplication),
+		CompanyName:      strings.TrimSpace(data.CompanyName),
+		JobTitle:         strings.TrimSpace(data.JobTitle),
+		JobDescription:   strings.TrimSpace(data.JobDescription),
 		CandidateResume:  strings.TrimSpace(data.Resume.Content),
 		CompanyPages:     companyPages,
 	}

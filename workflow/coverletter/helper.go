@@ -61,34 +61,77 @@ var blockedPathSegments = []string{
 
 type coverLetterFetchedData struct {
 	Resume             sqldb.Resume
-	JobApplication     sqldb.JobApplication
+	CompanyName        string
+	JobTitle           string
+	JobDescription     string
 	CurrentCoverLetter *string
 }
 
 func fetchCoverLetterData(ctx workflow.Context, input CoverLetterWorkflowInput, isEditMode bool) (coverLetterFetchedData, error) {
 	var data coverLetterFetchedData
 
+	if input.IdCoverLetter != 0 {
+		var coverLetter sqldb.CoverLetter
+		if err := workflow.ExecuteActivity(ctx, "GetCoverLetter", sqldb.GetCoverLetterInput{
+			IdCoverLetter: input.IdCoverLetter,
+		}).Get(ctx, &coverLetter); err != nil {
+			return data, fmt.Errorf("get cover letter: %w", err)
+		}
+
+		if err := workflow.ExecuteActivity(ctx, "GetResumeByID", coverLetter.ResumeId).Get(ctx, &data.Resume); err != nil {
+			return data, fmt.Errorf("get resume by id: %w", err)
+		}
+
+		data.CompanyName = coverLetter.CompanyName
+		data.JobTitle = coverLetter.JobTitle
+		data.JobDescription = coverLetter.JobDescription
+		if isEditMode {
+			data.CurrentCoverLetter = coverLetter.Body
+		}
+		return data, nil
+	}
+
+	if input.IdJobApplication == nil {
+		return data, fmt.Errorf("cover letter workflow requires id_cover_letter or id_job_application")
+	}
+
+	var jobApplication sqldb.JobApplication
 	if err := workflow.ExecuteActivity(ctx, "GetJobApplication", sqldb.GetJobApplicationInput{
-		IdJobApplication:          input.IdJobApplication,
+		IdJobApplication:          *input.IdJobApplication,
 		IncludeJobApplicationData: isEditMode,
-	}).Get(ctx, &data.JobApplication); err != nil {
+		IncludeCoverLetter:        isEditMode,
+	}).Get(ctx, &jobApplication); err != nil {
 		return data, fmt.Errorf("get job application: %w", err)
 	}
 
-	if err := workflow.ExecuteActivity(ctx, "GetResumeByID", data.JobApplication.ResumeId).Get(ctx, &data.Resume); err != nil {
+	if err := workflow.ExecuteActivity(ctx, "GetResumeByID", jobApplication.ResumeId).Get(ctx, &data.Resume); err != nil {
 		return data, fmt.Errorf("get resume by id: %w", err)
 	}
 
-	if isEditMode && data.JobApplication.JobApplicationData != nil {
-		data.CurrentCoverLetter = data.JobApplication.JobApplicationData.CoverLetter
+	data.CompanyName = jobApplication.CompanyName
+	data.JobTitle = jobApplication.JobTitle
+	data.JobDescription = jobApplication.JobDescription
+	if isEditMode {
+		if jobApplication.CoverLetter != nil && jobApplication.CoverLetter.Body != nil {
+			data.CurrentCoverLetter = jobApplication.CoverLetter.Body
+		} else if jobApplication.JobApplicationData != nil {
+			data.CurrentCoverLetter = jobApplication.JobApplicationData.CoverLetter
+		}
 	}
 
 	return data, nil
 }
 
+func derefUint(v *uint) uint {
+	if v == nil {
+		return 0
+	}
+	return *v
+}
+
 // ── orchestrator ──
 
-func gatherCompanyInfo(ctx workflow.Context, companyName, jobDescription string, idUser, idJobApplication uint) []sqldb.WebsiteCachePage {
+func gatherCompanyInfo(ctx workflow.Context, companyName, jobDescription string, idUser uint, idJobApplication *uint) []sqldb.WebsiteCachePage {
 	logger := workflow.GetLogger(ctx)
 
 	if strings.TrimSpace(companyName) == "" {
@@ -157,7 +200,7 @@ func searchCompany(ctx workflow.Context, companyName string) web.WebSearchOutput
 	return out
 }
 
-func llmFilterSearchResults(ctx workflow.Context, results []web.SerperOrganicResult, companyName, jobDescription string, idUser, idJobApplication uint) (string, []web.SerperOrganicResult) {
+func llmFilterSearchResults(ctx workflow.Context, results []web.SerperOrganicResult, companyName, jobDescription string, idUser uint, idJobApplication *uint) (string, []web.SerperOrganicResult) {
 	logger := workflow.GetLogger(ctx)
 
 	items := make([]llmFilterResultItem, len(results))
@@ -193,7 +236,7 @@ func llmFilterSearchResults(ctx workflow.Context, results []web.SerperOrganicRes
 		Model:            "google/gemma-4-31b-it:free",
 		ResponseSchema:   getLLMFilterResponseSchema(),
 		IdUser:           idUser,
-		IdJobApplication: &idJobApplication,
+		IdJobApplication: idJobApplication,
 	}
 
 	var llmResp types.AIPIResponse
@@ -250,7 +293,7 @@ func programmaticFilterResults(results []web.SerperOrganicResult, companyDomain 
 	return filtered
 }
 
-func concurrentScrapePages(ctx workflow.Context, results []web.SerperOrganicResult, idUser, idJobApplication uint) []sqldb.WebsiteCachePage {
+func concurrentScrapePages(ctx workflow.Context, results []web.SerperOrganicResult, idUser uint, idJobApplication *uint) []sqldb.WebsiteCachePage {
 	logger := workflow.GetLogger(ctx)
 	n := len(results)
 	if n == 0 {
@@ -264,7 +307,7 @@ func concurrentScrapePages(ctx workflow.Context, results []web.SerperOrganicResu
 			in := web.ScrapeWebPageInput{
 				Url:              r.Link,
 				IdUser:           idUser,
-				IdJobApplication: &idJobApplication,
+				IdJobApplication: idJobApplication,
 				Advanced:         false,
 			}
 			var out web.ScrapeWebPageOutput
@@ -304,7 +347,7 @@ func concurrentScrapePages(ctx workflow.Context, results []web.SerperOrganicResu
 	return nonEmpty
 }
 
-func generateCoverLetter(ctx workflow.Context, systemPrompt, userPrompt string, idUser uint, idJobApplication uint) (coverLetterLLMResponse, error) {
+func generateCoverLetter(ctx workflow.Context, systemPrompt, userPrompt string, idUser uint, idJobApplication *uint) (coverLetterLLMResponse, error) {
 	resp, err := callCoverLetterLLM(ctx, systemPrompt, userPrompt, idUser, idJobApplication)
 	if err != nil {
 		return coverLetterLLMResponse{}, err
@@ -332,14 +375,14 @@ func generateCoverLetter(ctx workflow.Context, systemPrompt, userPrompt string, 
 	return resp2, nil
 }
 
-func callCoverLetterLLM(ctx workflow.Context, systemPrompt, userPrompt string, idUser uint, idJobApplication uint) (coverLetterLLMResponse, error) {
+func callCoverLetterLLM(ctx workflow.Context, systemPrompt, userPrompt string, idUser uint, idJobApplication *uint) (coverLetterLLMResponse, error) {
 	llmRequest := types.AIPIRequest{
 		SystemMessage:    systemPrompt,
 		UserMessage:      userPrompt,
 		Model:            COVER_LETTER_MODEL,
 		ResponseSchema:   getCoverLetterResponseSchema(),
 		IdUser:           idUser,
-		IdJobApplication: &idJobApplication,
+		IdJobApplication: idJobApplication,
 	}
 
 	var llmResponse types.AIPIResponse
@@ -357,7 +400,7 @@ func callCoverLetterLLM(ctx workflow.Context, systemPrompt, userPrompt string, i
 
 // editCoverLetter runs the lightweight edit call: single-field schema, one
 // validation-retry, same model as the full write.
-func editCoverLetter(ctx workflow.Context, systemPrompt, userPrompt string, idUser uint, idJobApplication uint) (coverLetterLLMResponse, error) {
+func editCoverLetter(ctx workflow.Context, systemPrompt, userPrompt string, idUser uint, idJobApplication *uint) (coverLetterLLMResponse, error) {
 	resp, err := callEditCoverLetterLLM(ctx, systemPrompt, userPrompt, idUser, idJobApplication)
 	if err != nil {
 		return coverLetterLLMResponse{}, err
@@ -385,14 +428,14 @@ func editCoverLetter(ctx workflow.Context, systemPrompt, userPrompt string, idUs
 	return resp2, nil
 }
 
-func callEditCoverLetterLLM(ctx workflow.Context, systemPrompt, userPrompt string, idUser uint, idJobApplication uint) (coverLetterLLMResponse, error) {
+func callEditCoverLetterLLM(ctx workflow.Context, systemPrompt, userPrompt string, idUser uint, idJobApplication *uint) (coverLetterLLMResponse, error) {
 	llmRequest := types.AIPIRequest{
 		SystemMessage:    systemPrompt,
 		UserMessage:      userPrompt,
 		Model:            COVER_LETTER_MODEL,
 		ResponseSchema:   getEditCoverLetterResponseSchema(),
 		IdUser:           idUser,
-		IdJobApplication: &idJobApplication,
+		IdJobApplication: idJobApplication,
 	}
 
 	var llmResponse types.AIPIResponse
