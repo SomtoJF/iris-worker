@@ -413,16 +413,6 @@ func handleApplicationCancelled(ctx workflow.Context, input JobApplicationWorkfl
 	}
 	newCtx = workflow.WithActivityOptions(newCtx, cleanupOpts)
 
-	var reasonPtr *string
-	if reason != "" {
-		reasonPtr = &reason
-	}
-
-	updateJobApplication(newCtx, input.IdJobApplication, map[string]interface{}{
-		"status":              sqldb.JobApplicationStatusCancelled,
-		"cancellation_reason": reasonPtr,
-	})
-
 	workflow.ExecuteActivity(newCtx, "PublishRedisEvent", input.IdUser, string(realtimeevent.EventApplicationCancelled), map[string]interface{}{
 		"id":          input.ApplicationExternalId,
 		"jobTitle":    jobDetails.JobTitle,

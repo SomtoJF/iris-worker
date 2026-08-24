@@ -10,6 +10,7 @@
 - [ ] Clicking an application in the extension shouldn't automatically navigate to the application. Add a "to application" link for every application item.
 - [ ] Add functionality to generate cover letter straight from extension
 - [ ] Store cover letter in it's own model
+- [ ] Maybe throttle sync so users don't have to manually click sync before submitting
 - [x] Disable automated apply to every job that is not from greenhouse
 
 ## Others
