@@ -2,10 +2,11 @@
 
 ## Urgent
 
-- [ ] Add response status to application model
 - [ ] Inspect onboarding flow
+- [ ] Make mobile responsive
 - [ ] Cant scan this page. Basically anypage where greenhouse is embedded into the actual company's site, we can't scan [https://www.riskified.com/job-description/?gh_jid=8635191002#apply](https://www.riskified.com/job-description/?gh_jid=8635191002#apply)
 - [ ] Migrate server infra to kernel
+- [x] Add response status to application model
 - [x] Add chrome extension link to the marketing page and client dash
 - [x] Add name field to resumes
 - [x] View resumes by display name in extension
