@@ -2,10 +2,16 @@
 
 ## Urgent
 
-- [ ] Inspect onboarding flow
 - [ ] Make mobile responsive
 - [ ] Cant scan this page. Basically anypage where greenhouse is embedded into the actual company's site, we can't scan [https://www.riskified.com/job-description/?gh_jid=8635191002#apply](https://www.riskified.com/job-description/?gh_jid=8635191002#apply)
 - [ ] Migrate server infra to kernel
+- [ ] Customize cover letters
+- [ ] Functionality to tailor resumes to each application (see how to visualize it like git diffs)
+
+## Others
+
+- [ ] Implement email notifications on successful/failed applications, comments on feedback and user action required. (Mailjet)
+- [x] Inspect onboarding flow
 - [x] Add response status to application model
 - [x] Add chrome extension link to the marketing page and client dash
 - [x] Add name field to resumes
@@ -16,10 +22,6 @@
 - [x] Store cover letter in it's own model
 - [x] Maybe throttle sync so users don't have to manually click sync before submitting
 - [x] Disable automated apply to every job that is not from greenhouse
-
-## Others
-
-- [ ] Implement email notifications on successful/failed applications, comments on feedback and user action required. (Mailjet)
 - [x] Figure out captcha solving
   - [x] Turnstile + reCAPTCHA v2/v3 detect + CapSolver solve (working)
   - [x] hCaptcha detect + inject + buildTask (HCaptchaTaskProxyless — exact lowercase "less") wired end-to-end
