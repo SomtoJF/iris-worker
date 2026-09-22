@@ -5,14 +5,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SomtoJF/iris-worker/activity/realtimeevent"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
 
 type InitiateApplicationWorkflowInput struct {
-	Url              string `json:"url"`
-	IdUser           uint   `json:"id_user"`
-	IdJobApplication uint   `json:"id_job_application"`
+	Url                   string `json:"url"`
+	IdUser                uint   `json:"id_user"`
+	IdJobApplication      uint   `json:"id_job_application"`
+	ApplicationExternalId string `json:"application_external_id"`
 }
 
 type InitiateApplicationWorkflowResponse struct {
@@ -55,11 +57,33 @@ func InitiateApplicationWorkflow(ctx workflow.Context, input InitiateApplication
 		)
 	}
 
+	if err := updateJobApplication(ctx, input.IdJobApplication, map[string]interface{}{
+		"job_title":       jobDetails.JobTitle,
+		"company_name":    jobDetails.CompanyName,
+		"job_description": jobDetails.JobDescription,
+	}); err != nil {
+		logger.Error("Failed to update job application", "error", err)
+		return InitiateApplicationWorkflowResponse{}, err
+	}
+
+	if err := publishApplicationDetailsUpdated(ctx, input, jobDetails); err != nil {
+		logger.Error("Failed to publish application details update", "error", err)
+	}
+
 	return InitiateApplicationWorkflowResponse{
 		JobTitle:       jobDetails.JobTitle,
 		CompanyName:    jobDetails.CompanyName,
 		JobDescription: jobDetails.JobDescription,
 	}, nil
+}
+
+func publishApplicationDetailsUpdated(ctx workflow.Context, input InitiateApplicationWorkflowInput, jobDetails JobDetails) error {
+	return workflow.ExecuteActivity(ctx, "PublishRedisEvent", input.IdUser, string(realtimeevent.EventApplicationDetailsUpdated), map[string]interface{}{
+		"id":          input.ApplicationExternalId,
+		"jobTitle":    jobDetails.JobTitle,
+		"companyName": jobDetails.CompanyName,
+		"updatedAt":   workflow.Now(ctx).UTC().Format(time.RFC3339),
+	}).Get(ctx, nil)
 }
 
 func scrapeWebPageTextOnly(ctx workflow.Context, url string, idUser uint, idJobApplication uint) (string, error) {

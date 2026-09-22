@@ -13,12 +13,13 @@ import (
 type EventType string
 
 const (
-	EventApplicationSuccessful EventType = "APPLICATION_SUCCESSFUL"
-	EventApplicationFailed     EventType = "APPLICATION_FAILED"
-	EventUserNotification      EventType = "USER_NOTIFICATION"
-	EventUserActionRequired    EventType = "USER_ACTION_REQUIRED"
-	EventApplicationCancelled  EventType = "APPLICATION_CANCELLED"
-	EventApplicationHalted     EventType = "APPLICATION_HALTED"
+	EventApplicationSuccessful     EventType = "APPLICATION_SUCCESSFUL"
+	EventApplicationFailed         EventType = "APPLICATION_FAILED"
+	EventUserNotification          EventType = "USER_NOTIFICATION"
+	EventUserActionRequired        EventType = "USER_ACTION_REQUIRED"
+	EventApplicationCancelled      EventType = "APPLICATION_CANCELLED"
+	EventApplicationHalted         EventType = "APPLICATION_HALTED"
+	EventApplicationDetailsUpdated EventType = "APPLICATION_DETAILS_UPDATED"
 )
 
 type Activities struct {
