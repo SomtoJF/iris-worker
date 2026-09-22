@@ -3,16 +3,17 @@ package browserpool
 import (
 	"errors"
 
+	"github.com/SomtoJF/iris-worker/workflow/browserpool/types"
 	"go.temporal.io/sdk/workflow"
 )
 
 type ApplicationQueue struct {
-	Items []ApplicationQueueItem `json:"items"`
+	Items []types.ApplicationQueueItem `json:"items"`
 	Mutex workflow.Mutex
 	Ctx   workflow.Context
 }
 
-func NewApplicationQueue(ctx workflow.Context, initialItems []ApplicationQueueItem) *ApplicationQueue {
+func NewApplicationQueue(ctx workflow.Context, initialItems []types.ApplicationQueueItem) *ApplicationQueue {
 	return &ApplicationQueue{
 		Items: initialItems,
 		Mutex: workflow.NewMutex(ctx),
@@ -20,7 +21,7 @@ func NewApplicationQueue(ctx workflow.Context, initialItems []ApplicationQueueIt
 	}
 }
 
-func (q *ApplicationQueue) Enqueue(item ApplicationQueueItem) {
+func (q *ApplicationQueue) Enqueue(item types.ApplicationQueueItem) {
 	q.Mutex.Lock(q.Ctx)
 	defer q.Mutex.Unlock()
 	q.Items = append(q.Items, item)
@@ -32,20 +33,20 @@ func (q *ApplicationQueue) IsEmpty() bool {
 	return len(q.Items) == 0
 }
 
-func (q *ApplicationQueue) Dequeue(ctx workflow.Context) (ApplicationQueueItem, error) {
+func (q *ApplicationQueue) Dequeue(ctx workflow.Context) (types.ApplicationQueueItem, error) {
 	q.Mutex.Lock(q.Ctx)
 	defer q.Mutex.Unlock()
 	if len(q.Items) == 0 {
-		return ApplicationQueueItem{}, errors.New("queue is empty")
+		return types.ApplicationQueueItem{}, errors.New("queue is empty")
 	}
 	item := q.Items[0]
 	q.Items = q.Items[1:]
 	return item, nil
 }
 
-func (q *ApplicationQueue) Snapshot() []ApplicationQueueItem {
+func (q *ApplicationQueue) Snapshot() []types.ApplicationQueueItem {
 	q.Mutex.Lock(q.Ctx)
 	defer q.Mutex.Unlock()
 
-	return append([]ApplicationQueueItem(nil), q.Items...)
+	return append([]types.ApplicationQueueItem(nil), q.Items...)
 }
