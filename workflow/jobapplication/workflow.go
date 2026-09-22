@@ -10,6 +10,7 @@ import (
 	"github.com/SomtoJF/iris-worker/activity/realtimeevent"
 	"github.com/SomtoJF/iris-worker/activity/sqldb"
 	"github.com/SomtoJF/iris-worker/browserfactory"
+	browserpooltypes "github.com/SomtoJF/iris-worker/workflow/browserpool/types"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
@@ -20,6 +21,7 @@ type JobApplicationWorkflowInput struct {
 	Url                   string `json:"url"`
 	IdUser                uint   `json:"id_user"`
 	IdResume              uint   `json:"id_resume"`
+	BrowserPoolWorkflowID string `json:"browser_pool_workflow_id,omitempty"`
 }
 
 const CancelSignalName = "CANCEL_APPLICATION"
@@ -96,6 +98,7 @@ const SESSION_TIMEOUT = 23*time.Hour + 50*time.Minute
 
 func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowInput) error {
 	logger := workflow.GetLogger(ctx)
+	defer notifyBrowserPoolApplicationSettled(ctx, input)
 
 	logger.Info("JobApplicationWorkflow started", "url", input.Url)
 
@@ -204,6 +207,23 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	}
 
 	return nil
+}
+
+func notifyBrowserPoolApplicationSettled(ctx workflow.Context, input JobApplicationWorkflowInput) {
+	if input.BrowserPoolWorkflowID == "" {
+		return
+	}
+
+	err := workflow.SignalExternalWorkflow(
+		ctx,
+		input.BrowserPoolWorkflowID,
+		"",
+		browserpooltypes.BROWSER_POOL_APPLICATION_SETTLED_SIGNAL_NAME,
+		browserpooltypes.BrowserPoolApplicationSettledPayload{IdJobApplication: input.IdJobApplication},
+	).Get(ctx, nil)
+	if err != nil {
+		workflow.GetLogger(ctx).Error("Failed to signal browser pool application completion", "error", err)
+	}
 }
 
 type executeJobApplicationResult struct {
