@@ -162,6 +162,7 @@ func getModelRates(model string) modelRates {
 		"x-ai/grok-4-fast":                             {inputRate: 0.20, outputRate: 0.50},
 		"google/gemma-4-31b-it:free":                   {inputRate: 0.00, outputRate: 0.00},
 		"google/gemma-4-31b-it":                        {inputRate: 0.12, outputRate: 0.35},
+		"typesafe/jev-1.13":                            {inputRate: 0.042, outputRate: 0.00},
 	}
 
 	if rate, ok := rates[model]; ok {
