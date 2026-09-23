@@ -18,6 +18,13 @@ type BrowserPoolWorkflowInput struct {
 	ActiveApplications []types.ApplicationQueueItem `json:"active_applications"`
 }
 
+const (
+	// 10,000 events limit
+	browserPoolHistoryLengthLimit = 10000
+	// 10MB workflow history size limit
+	browserPoolHistorySizeLimit = 10485760
+)
+
 func BrowserPoolWorkflow(ctx workflow.Context, input BrowserPoolWorkflowInput) error {
 	logger := workflow.GetLogger(ctx)
 
@@ -48,6 +55,13 @@ func BrowserPoolWorkflow(ctx workflow.Context, input BrowserPoolWorkflowInput) e
 		if !rollingOver && rolloverTimer.IsReady() {
 			rollingOver = true
 			logger.Info("Browser pool rollover started")
+		}
+		if !rollingOver && browserPoolHistoryLimitReached(ctx) {
+			rollingOver = true
+			logger.Info("Browser pool history rollover started",
+				"historyLength", workflow.GetInfo(ctx).GetCurrentHistoryLength(),
+				"historySize", workflow.GetInfo(ctx).GetCurrentHistorySize(),
+			)
 		}
 
 		if rollingOver {
@@ -110,6 +124,12 @@ func BrowserPoolWorkflow(ctx workflow.Context, input BrowserPoolWorkflowInput) e
 
 		selector.Select(ctx)
 	}
+}
+
+func browserPoolHistoryLimitReached(ctx workflow.Context) bool {
+	info := workflow.GetInfo(ctx)
+	return info.GetCurrentHistoryLength() > browserPoolHistoryLengthLimit ||
+		info.GetCurrentHistorySize() > browserPoolHistorySizeLimit
 }
 
 func restoreActiveApplications(ctx workflow.Context, sem workflow.Semaphore, items []types.ApplicationQueueItem) (map[uint]types.ApplicationQueueItem, error) {
