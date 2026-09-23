@@ -14,6 +14,7 @@ import (
 	"github.com/SomtoJF/iris-worker/initializers/env"
 	"github.com/SomtoJF/iris-worker/workflow/coverletter"
 	"github.com/SomtoJF/iris-worker/workflow/handleuseraction"
+	"github.com/SomtoJF/iris-worker/workflow/initiateapplication"
 	"github.com/SomtoJF/iris-worker/workflow/jobapplication"
 	"github.com/SomtoJF/iris-worker/workflow/jobdiscovery"
 	"github.com/SomtoJF/iris-worker/workflow/processresume"
@@ -63,7 +64,7 @@ func main() {
 func registerJobApplicationWorkflows(w worker.Worker) {
 	w.RegisterWorkflow(jobapplication.JobApplicationWorkflow)
 	w.RegisterWorkflow(jobapplication.AutofillApplicationWorkflow)
-	w.RegisterWorkflow(jobapplication.InitiateApplicationWorkflow)
+	w.RegisterWorkflow(initiateapplication.InitiateApplicationWorkflow)
 	w.RegisterWorkflow(processresume.ProcessResumeWorkflow)
 	w.RegisterWorkflow(coverletter.CoverLetterWorkflow)
 	w.RegisterWorkflow(submitapplication.SubmitApplicationWorkflow)

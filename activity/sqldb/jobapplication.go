@@ -30,6 +30,7 @@ const (
 	JobApplicationStatusBlocked    = model.JobApplicationStatusBlocked
 	JobApplicationStatusCancelled  = model.JobApplicationStatusCancelled
 	JobApplicationStatusHalted     = model.JobApplicationStatusHalted
+	JobApplicationStatusQueued     = model.JobApplicationStatusQueued
 )
 
 func (a *Activity) UpdateJobApplication(ctx context.Context, input UpdateJobApplicationInput) error {

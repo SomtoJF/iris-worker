@@ -17,11 +17,23 @@ import (
 
 type JobApplicationWorkflowInput struct {
 	IdJobApplication      uint   `json:"id_job_application"`
-	ApplicationExternalId string `json:"application_external_id"`
-	Url                   string `json:"url"`
-	IdUser                uint   `json:"id_user"`
-	IdResume              uint   `json:"id_resume"`
 	BrowserPoolWorkflowID string `json:"browser_pool_workflow_id,omitempty"`
+}
+
+type jobApplicationRuntimeInput struct {
+	IdJobApplication      uint
+	ApplicationExternalId string
+	Url                   string
+	IdUser                uint
+	IdResume              uint
+	BrowserPoolWorkflowID string
+}
+
+type JobDetails struct {
+	JobTitle          string
+	CompanyName       string
+	JobDescription    string
+	IsValidJobPosting bool
 }
 
 const CancelSignalName = "CANCEL_APPLICATION"
@@ -77,7 +89,7 @@ func handleCancelOrTimeout(
 	ctx workflow.Context,
 	cancelCtx workflow.Context,
 	timedOut bool,
-	input JobApplicationWorkflowInput,
+	input jobApplicationRuntimeInput,
 	jobDetails JobDetails,
 	cancelPayload CancelSignalPayload,
 ) (handled bool, err error) {
@@ -98,9 +110,8 @@ const SESSION_TIMEOUT = 23*time.Hour + 50*time.Minute
 
 func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowInput) error {
 	logger := workflow.GetLogger(ctx)
-	defer notifyBrowserPoolApplicationSettled(ctx, input)
 
-	logger.Info("JobApplicationWorkflow started", "url", input.Url)
+	logger.Info("JobApplicationWorkflow started", "id_job_application", input.IdJobApplication)
 
 	activityOptions := workflow.ActivityOptions{
 		StartToCloseTimeout: 5 * time.Minute,
@@ -112,6 +123,29 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		},
 	}
 	ctx = workflow.WithActivityOptions(ctx, activityOptions)
+
+	var application sqldb.JobApplication
+	if err := workflow.ExecuteActivity(ctx, "GetJobApplication", sqldb.GetJobApplicationInput{
+		IdJobApplication: input.IdJobApplication,
+	}).Get(ctx, &application); err != nil {
+		logger.Error("Failed to get job application", "error", err)
+		return err
+	}
+	jobDetails := JobDetails{
+		JobTitle:          application.JobTitle,
+		CompanyName:       application.CompanyName,
+		JobDescription:    application.JobDescription,
+		IsValidJobPosting: true,
+	}
+	runtimeInput := jobApplicationRuntimeInput{
+		IdJobApplication:      application.IdJobApplication,
+		ApplicationExternalId: application.IdExternal.String(),
+		Url:                   application.Url,
+		IdUser:                application.UserId,
+		IdResume:              application.ResumeId,
+		BrowserPoolWorkflowID: input.BrowserPoolWorkflowID,
+	}
+	defer notifyBrowserPoolApplicationSettled(ctx, runtimeInput)
 
 	// Set up cancellation signal listener
 	cancelCtx, cancelFunc := workflow.WithCancel(ctx)
@@ -134,7 +168,6 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 
 	workflowId := workflow.GetInfo(ctx).WorkflowExecution.ID
 
-	var jobDetails JobDetails
 	var execResult executeJobApplicationResult
 
 	sessionCtx, err := workflow.CreateSession(cancelCtx, &workflow.SessionOptions{
@@ -142,18 +175,18 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		CreationTimeout:  time.Minute,
 	})
 	if err != nil {
-		if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
+		if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, runtimeInput, jobDetails, cancelPayload); handled {
 			return cerr
 		}
 		logger.Error("Failed to create session", "error", err)
-		handleApplicationError(ctx, input, jobDetails, "An error occurred while starting your application session")
+		handleApplicationError(ctx, runtimeInput, jobDetails, "An error occurred while starting your application session")
 		return err
 	}
 	defer workflow.CompleteSession(sessionCtx)
 
-	err = executeJobApplication(ctx, cancelCtx, sessionCtx, workflowId, input, &jobDetails, &execResult)
+	err = executeJobApplication(ctx, cancelCtx, sessionCtx, workflowId, runtimeInput, &jobDetails, &execResult)
 	if err != nil {
-		if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
+		if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, runtimeInput, jobDetails, cancelPayload); handled {
 			return cerr
 		}
 
@@ -177,18 +210,18 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		}
 
 		if terminalStatus == sqldb.JobApplicationStatusHalted {
-			handleApplicationHalted(ctx, input, jobDetails, publicMessage)
+			handleApplicationHalted(ctx, runtimeInput, jobDetails, publicMessage)
 		} else {
-			handleApplicationError(ctx, input, jobDetails, publicMessage)
+			handleApplicationError(ctx, runtimeInput, jobDetails, publicMessage)
 		}
 		return err
 	}
 
-	handleApplicationSuccess(ctx, input, jobDetails)
+	handleApplicationSuccess(ctx, runtimeInput, jobDetails)
 
 	questions := mapToQuestions(execResult.QAMap)
 	if len(questions) > 0 {
-		deduped, err := deduplicateQA(ctx, input.IdUser, input.IdJobApplication, questions)
+		deduped, err := deduplicateQA(ctx, runtimeInput.IdUser, runtimeInput.IdJobApplication, questions)
 		if err != nil {
 			logger.Warn("Failed to deduplicate Q&A, saving raw", "error", err)
 		} else {
@@ -196,12 +229,12 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		}
 	}
 
-	if err := saveApplicationData(ctx, input.IdUser, input.IdJobApplication, questions); err != nil {
+	if err := saveApplicationData(ctx, runtimeInput.IdUser, runtimeInput.IdJobApplication, questions); err != nil {
 		logger.Error("Failed to save application data", "error", err)
 	}
 
 	if execResult.CoverLetter != nil && *execResult.CoverLetter != "" {
-		if err := upsertCoverLetter(ctx, input, jobDetails, *execResult.CoverLetter); err != nil {
+		if err := upsertCoverLetter(ctx, runtimeInput, jobDetails, *execResult.CoverLetter); err != nil {
 			logger.Error("Failed to save cover letter", "error", err)
 		}
 	}
@@ -209,7 +242,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	return nil
 }
 
-func notifyBrowserPoolApplicationSettled(ctx workflow.Context, input JobApplicationWorkflowInput) {
+func notifyBrowserPoolApplicationSettled(ctx workflow.Context, input jobApplicationRuntimeInput) {
 	if input.BrowserPoolWorkflowID == "" {
 		return
 	}
@@ -236,7 +269,7 @@ func executeJobApplication(
 	cancelCtx workflow.Context,
 	sessionCtx workflow.Context,
 	workflowID string,
-	input JobApplicationWorkflowInput,
+	input jobApplicationRuntimeInput,
 	jobDetails *JobDetails,
 	result *executeJobApplicationResult,
 ) error {
@@ -272,28 +305,6 @@ func executeJobApplication(
 			WorkflowID: workflowID,
 		}).Get(newCtx, nil)
 	}()
-
-	retrieved, err := retrieveJobDetails(sessionCtx, workflowID, input.Url, input.IdUser, input.IdJobApplication)
-	if err != nil {
-		return newJobAppError(err, "Failed to retrieve job details", "We couldn't retrieve the job details")
-	}
-	*jobDetails = retrieved
-
-	if !jobDetails.IsValidJobPosting {
-		return newJobAppError(
-			temporal.NewNonRetryableApplicationError("invalid job posting", "InvalidJobPosting", nil),
-			"Invalid job posting",
-			"The job posting is invalid. The link doesn't contain the job description",
-		)
-	}
-
-	if err := updateJobApplication(cancelCtx, input.IdJobApplication, map[string]interface{}{
-		"job_title":       jobDetails.JobTitle,
-		"company_name":    jobDetails.CompanyName,
-		"job_description": jobDetails.JobDescription,
-	}); err != nil {
-		return newJobAppError(err, "Failed to update job application", "We couldn't update the job application")
-	}
 
 	userProfileBytes, err := json.Marshal(userProfile)
 	if err != nil {
@@ -431,7 +442,7 @@ func extractRequiredFields(taggedNodes []browserfactory.SerializableTaggedNode) 
 	return required
 }
 
-func handleApplicationCancelled(ctx workflow.Context, input JobApplicationWorkflowInput, jobDetails JobDetails, reason string) {
+func handleApplicationCancelled(ctx workflow.Context, input jobApplicationRuntimeInput, jobDetails JobDetails, reason string) {
 	newCtx, _ := workflow.NewDisconnectedContext(ctx)
 	cleanupOpts := workflow.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
@@ -447,7 +458,7 @@ func handleApplicationCancelled(ctx workflow.Context, input JobApplicationWorkfl
 	}).Get(newCtx, nil)
 }
 
-func handleApplicationError(ctx workflow.Context, input JobApplicationWorkflowInput, jobDetails JobDetails, failureReason string) {
+func handleApplicationError(ctx workflow.Context, input jobApplicationRuntimeInput, jobDetails JobDetails, failureReason string) {
 	newCtx, _ := workflow.NewDisconnectedContext(ctx)
 	cleanupOpts := workflow.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
@@ -468,7 +479,7 @@ func handleApplicationError(ctx workflow.Context, input JobApplicationWorkflowIn
 	}).Get(newCtx, nil)
 }
 
-func handleApplicationHalted(ctx workflow.Context, input JobApplicationWorkflowInput, jobDetails JobDetails, haltReason string) {
+func handleApplicationHalted(ctx workflow.Context, input jobApplicationRuntimeInput, jobDetails JobDetails, haltReason string) {
 	newCtx, _ := workflow.NewDisconnectedContext(ctx)
 	cleanupOpts := workflow.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
@@ -489,7 +500,7 @@ func handleApplicationHalted(ctx workflow.Context, input JobApplicationWorkflowI
 	}).Get(newCtx, nil)
 }
 
-func handleApplicationSuccess(ctx workflow.Context, input JobApplicationWorkflowInput, jobDetails JobDetails) {
+func handleApplicationSuccess(ctx workflow.Context, input jobApplicationRuntimeInput, jobDetails JobDetails) {
 	updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusApplied, nil)
 	workflow.ExecuteActivity(ctx, "PublishRedisEvent", input.IdUser, string(realtimeevent.EventApplicationSuccessful), map[string]interface{}{
 		"id":          input.ApplicationExternalId,
@@ -541,7 +552,7 @@ func saveApplicationData(ctx workflow.Context, idUser, idJobApplication uint, qu
 	}).Get(ctx, nil)
 }
 
-func upsertCoverLetter(ctx workflow.Context, input JobApplicationWorkflowInput, jobDetails JobDetails, body string) error {
+func upsertCoverLetter(ctx workflow.Context, input jobApplicationRuntimeInput, jobDetails JobDetails, body string) error {
 	return workflow.ExecuteActivity(ctx, "UpsertCoverLetter", sqldb.UpsertCoverLetterInput{
 		IdUser:           input.IdUser,
 		IdJobApplication: input.IdJobApplication,
