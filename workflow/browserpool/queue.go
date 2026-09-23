@@ -44,7 +44,7 @@ func (q *ApplicationQueue) Dequeue(ctx workflow.Context) (types.ApplicationQueue
 	return item, nil
 }
 
-func (q *ApplicationQueue) Remove(idJobApplication uint) bool {
+func (q *ApplicationQueue) Remove(idJobApplication uint) (types.ApplicationQueueItem, bool) {
 	q.Mutex.Lock(q.Ctx)
 	defer q.Mutex.Unlock()
 
@@ -53,9 +53,9 @@ func (q *ApplicationQueue) Remove(idJobApplication uint) bool {
 			continue
 		}
 		q.Items = append(q.Items[:i], q.Items[i+1:]...)
-		return true
+		return item, true
 	}
-	return false
+	return types.ApplicationQueueItem{}, false
 }
 
 func (q *ApplicationQueue) Snapshot() []types.ApplicationQueueItem {

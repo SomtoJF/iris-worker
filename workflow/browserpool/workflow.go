@@ -3,6 +3,7 @@ package browserpool
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/SomtoJF/iris-worker/workflow/browserpool/types"
@@ -22,6 +23,13 @@ func BrowserPoolWorkflow(ctx workflow.Context, input BrowserPoolWorkflowInput) e
 
 	applicationQueue := NewApplicationQueue(ctx, input.InitialQueue)
 	logger.Info("Application queue initialized", "initialQueue", input.InitialQueue)
+	queuedApplications := make(map[string]struct{}, len(input.InitialQueue))
+	for _, item := range input.InitialQueue {
+		queuedApplications[applicationQueueKey(item)] = struct{}{}
+	}
+	for _, item := range input.ActiveApplications {
+		queuedApplications[applicationQueueKey(item)] = struct{}{}
+	}
 
 	sem := workflow.NewSemaphore(ctx, types.MAX_CONCURRENT_APPLICATIONS)
 	activeApplications, err := restoreActiveApplications(ctx, sem, input.ActiveApplications)
@@ -43,10 +51,10 @@ func BrowserPoolWorkflow(ctx workflow.Context, input BrowserPoolWorkflowInput) e
 		}
 
 		if rollingOver {
-			drainApplicationSignals(queueSignalChan, applicationQueue)
-			drainCancellationSignals(ctx, cancelSignalChan, applicationQueue, activeApplications)
-			drainSettledApplications(settledSignalChan, sem, activeApplications)
-			drainChildCompletions(childCompleted, sem, activeApplications)
+			drainApplicationSignals(queueSignalChan, applicationQueue, queuedApplications)
+			drainCancellationSignals(ctx, cancelSignalChan, applicationQueue, queuedApplications, activeApplications)
+			drainSettledApplications(settledSignalChan, sem, queuedApplications, activeApplications)
+			drainChildCompletions(childCompleted, sem, queuedApplications, activeApplications)
 
 			return workflow.NewContinueAsNewError(ctx, BrowserPoolWorkflow, BrowserPoolWorkflowInput{
 				InitialQueue:       applicationQueue.Snapshot(),
@@ -82,22 +90,22 @@ func BrowserPoolWorkflow(ctx workflow.Context, input BrowserPoolWorkflowInput) e
 		selector.AddReceive(queueSignalChan, func(channel workflow.ReceiveChannel, _ bool) {
 			var item types.ApplicationQueueItem
 			channel.Receive(ctx, &item)
-			applicationQueue.Enqueue(item)
+			enqueueApplication(applicationQueue, queuedApplications, item)
 		})
 		selector.AddReceive(cancelSignalChan, func(channel workflow.ReceiveChannel, _ bool) {
 			var payload types.CancelApplicationPayload
 			channel.Receive(ctx, &payload)
-			handleApplicationCancellation(ctx, applicationQueue, activeApplications, payload)
+			handleApplicationCancellation(ctx, applicationQueue, queuedApplications, activeApplications, payload)
 		})
 		selector.AddReceive(settledSignalChan, func(channel workflow.ReceiveChannel, _ bool) {
 			var settled types.BrowserPoolApplicationSettledPayload
 			channel.Receive(ctx, &settled)
-			settleApplication(sem, activeApplications, settled.IdJobApplication)
+			settleApplication(sem, queuedApplications, activeApplications, settled.IdJobApplication)
 		})
 		selector.AddReceive(childCompleted, func(channel workflow.ReceiveChannel, _ bool) {
 			var idJobApplication uint
 			channel.Receive(ctx, &idJobApplication)
-			settleApplication(sem, activeApplications, idJobApplication)
+			settleApplication(sem, queuedApplications, activeApplications, idJobApplication)
 		})
 
 		selector.Select(ctx)
@@ -118,36 +126,52 @@ func restoreActiveApplications(ctx workflow.Context, sem workflow.Semaphore, ite
 	return activeApplications, nil
 }
 
-func settleApplication(sem workflow.Semaphore, activeApplications map[uint]types.ApplicationQueueItem, idJobApplication uint) {
-	if _, exists := activeApplications[idJobApplication]; !exists {
+func settleApplication(sem workflow.Semaphore, queuedApplications map[string]struct{}, activeApplications map[uint]types.ApplicationQueueItem, idJobApplication uint) {
+	item, exists := activeApplications[idJobApplication]
+	if !exists {
 		return
 	}
 	delete(activeApplications, idJobApplication)
+	delete(queuedApplications, applicationQueueKey(item))
 	sem.Release(1)
 }
 
-func drainApplicationSignals(signalChan workflow.ReceiveChannel, applicationQueue *ApplicationQueue) {
+func enqueueApplication(applicationQueue *ApplicationQueue, queuedApplications map[string]struct{}, item types.ApplicationQueueItem) {
+	key := applicationQueueKey(item)
+	if _, exists := queuedApplications[key]; exists {
+		return
+	}
+	queuedApplications[key] = struct{}{}
+	applicationQueue.Enqueue(item)
+}
+
+func applicationQueueKey(item types.ApplicationQueueItem) string {
+	return strconv.FormatUint(uint64(item.IdJobApplication), 10)
+}
+
+func drainApplicationSignals(signalChan workflow.ReceiveChannel, applicationQueue *ApplicationQueue, queuedApplications map[string]struct{}) {
 	for {
 		var item types.ApplicationQueueItem
 		if !signalChan.ReceiveAsync(&item) {
 			return
 		}
-		applicationQueue.Enqueue(item)
+		enqueueApplication(applicationQueue, queuedApplications, item)
 	}
 }
 
-func drainCancellationSignals(ctx workflow.Context, signalChan workflow.ReceiveChannel, applicationQueue *ApplicationQueue, activeApplications map[uint]types.ApplicationQueueItem) {
+func drainCancellationSignals(ctx workflow.Context, signalChan workflow.ReceiveChannel, applicationQueue *ApplicationQueue, queuedApplications map[string]struct{}, activeApplications map[uint]types.ApplicationQueueItem) {
 	for {
 		var payload types.CancelApplicationPayload
 		if !signalChan.ReceiveAsync(&payload) {
 			return
 		}
-		handleApplicationCancellation(ctx, applicationQueue, activeApplications, payload)
+		handleApplicationCancellation(ctx, applicationQueue, queuedApplications, activeApplications, payload)
 	}
 }
 
-func handleApplicationCancellation(ctx workflow.Context, applicationQueue *ApplicationQueue, activeApplications map[uint]types.ApplicationQueueItem, payload types.CancelApplicationPayload) {
-	if applicationQueue.Remove(payload.IdJobApplication) {
+func handleApplicationCancellation(ctx workflow.Context, applicationQueue *ApplicationQueue, queuedApplications map[string]struct{}, activeApplications map[uint]types.ApplicationQueueItem, payload types.CancelApplicationPayload) {
+	if item, removed := applicationQueue.Remove(payload.IdJobApplication); removed {
+		delete(queuedApplications, applicationQueueKey(item))
 		return
 	}
 
@@ -158,23 +182,23 @@ func handleApplicationCancellation(ctx workflow.Context, applicationQueue *Appli
 	workflow.SignalExternalWorkflow(ctx, item.ApplicationWorkflowId, "", jobapplication.CancelSignalName, jobapplication.CancelSignalPayload{Reason: payload.Reason})
 }
 
-func drainSettledApplications(signalChan workflow.ReceiveChannel, sem workflow.Semaphore, activeApplications map[uint]types.ApplicationQueueItem) {
+func drainSettledApplications(signalChan workflow.ReceiveChannel, sem workflow.Semaphore, queuedApplications map[string]struct{}, activeApplications map[uint]types.ApplicationQueueItem) {
 	for {
 		var settled types.BrowserPoolApplicationSettledPayload
 		if !signalChan.ReceiveAsync(&settled) {
 			return
 		}
-		settleApplication(sem, activeApplications, settled.IdJobApplication)
+		settleApplication(sem, queuedApplications, activeApplications, settled.IdJobApplication)
 	}
 }
 
-func drainChildCompletions(channel workflow.ReceiveChannel, sem workflow.Semaphore, activeApplications map[uint]types.ApplicationQueueItem) {
+func drainChildCompletions(channel workflow.ReceiveChannel, sem workflow.Semaphore, queuedApplications map[string]struct{}, activeApplications map[uint]types.ApplicationQueueItem) {
 	for {
 		var idJobApplication uint
 		if !channel.ReceiveAsync(&idJobApplication) {
 			return
 		}
-		settleApplication(sem, activeApplications, idJobApplication)
+		settleApplication(sem, queuedApplications, activeApplications, idJobApplication)
 	}
 }
 
