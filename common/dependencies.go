@@ -84,10 +84,10 @@ func MakeDependencies() (Dependencies, error) {
 
 	fs := fs.NewTemporaryFilesystem()
 	openrouterClient := openrouter.NewClient(apiKey)
-	browserClient, err := browserfactory.NewBrowserFactory(fs)
-	if err != nil {
-		return nil, fmt.Errorf("browser: %w", err)
-	}
+	// browserClient, err := browserfactory.NewBrowserFactory(fs)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("browser: %w", err)
+	// }
 
 	s3Client, err := s3.InitializeS3()
 	if err != nil {
@@ -129,9 +129,10 @@ func MakeDependencies() (Dependencies, error) {
 	}
 
 	return &dependencies{
-		db:             db,
-		aipiClient:     aipi.NewAIPIClient(openrouterClient, db),
-		browserClient:  browserClient,
+		db:         db,
+		aipiClient: aipi.NewAIPIClient(openrouterClient, db),
+		// TODO: browserClient : browserClient
+		browserClient:  nil,
 		fs:             fs,
 		s3Manager:      s3Manager,
 		temporalClient: temporalClient,

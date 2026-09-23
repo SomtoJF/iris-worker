@@ -168,6 +168,7 @@ func executeJobApplication(ctx workflow.Context, item types.ApplicationQueueItem
 	}
 
 	childCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
+		WorkflowID:               item.ApplicationWorkflowId,
 		ParentClosePolicy:        enumspb.PARENT_CLOSE_POLICY_ABANDON,
 		WorkflowTaskTimeout:      1 * time.Minute,
 		WorkflowExecutionTimeout: 30 * time.Minute,

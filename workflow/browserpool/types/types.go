@@ -8,10 +8,11 @@ const MAX_CONCURRENT_APPLICATIONS = 4
 const BROWSER_POOL_ROLLOVER_TIMEOUT = 7 * 24 * time.Hour
 
 type ApplicationQueueItem struct {
-	IdJobApplication uint   `json:"id_job_application"`
-	Url              string `json:"url"`
-	IdUser           uint   `json:"id_user"`
-	IdResume         uint   `json:"id_resume"`
+	IdJobApplication      uint   `json:"id_job_application"`
+	Url                   string `json:"url"`
+	IdUser                uint   `json:"id_user"`
+	IdResume              uint   `json:"id_resume"`
+	ApplicationWorkflowId string `json:"application_workflow_id"`
 }
 
 type BrowserPoolApplicationSettledPayload struct {

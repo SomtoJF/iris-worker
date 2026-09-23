@@ -1,6 +1,7 @@
 package jobapplication
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -17,7 +18,9 @@ type InitiateApplicationWorkflowInput struct {
 	IdJobApplication      uint    `json:"id_job_application"`
 	ApplicationExternalId string  `json:"application_external_id"`
 	ApplyAutonomously     bool    `json:"apply_autonomously"`
+	IdResume              *uint   `json:"id_resume"`
 	BrowserPoolWorkflowId *string `json:"browser_pool_workflow_id"`
+	ApplicationWorkflowId *string `json:"application_workflow_id"`
 }
 
 type InitiateApplicationWorkflowResponse struct {
@@ -73,10 +76,13 @@ func InitiateApplicationWorkflow(ctx workflow.Context, input InitiateApplication
 		logger.Error("Failed to publish application details update", "error", err)
 	}
 
-	if input.ApplyAutonomously && input.BrowserPoolWorkflowId != nil {
+	if input.ApplyAutonomously {
 		if err := queueAutonomousApplication(ctx, input); err != nil {
 			logger.Error("Failed to signal browser pool application completion", "error", err)
 		}
+
+		// TODO: Update application status to queued
+		// TODO: Publish notification to client for application status change
 	}
 
 	return InitiateApplicationWorkflowResponse{
@@ -87,12 +93,24 @@ func InitiateApplicationWorkflow(ctx workflow.Context, input InitiateApplication
 }
 
 func queueAutonomousApplication(ctx workflow.Context, input InitiateApplicationWorkflowInput) error {
+	if input.IdResume == nil {
+		return errors.New("no resume id provided for auto application")
+	}
+
+	if input.ApplicationWorkflowId == nil {
+		return errors.New("no application workflow id provided for auto application")
+	}
+
+	if input.BrowserPoolWorkflowId == nil {
+		return errors.New("BrowserPool workflow id not provided for auto application")
+	}
+
 	err := workflow.SignalExternalWorkflow(
 		ctx,
 		*input.BrowserPoolWorkflowId,
 		"",
 		browserpooltypes.QUEUE_APPLICATION_SIGNAL_NAME,
-		browserpooltypes.BrowserPoolApplicationSettledPayload{IdJobApplication: input.IdJobApplication},
+		browserpooltypes.ApplicationQueueItem{IdJobApplication: input.IdJobApplication, ApplicationWorkflowId: *input.ApplicationWorkflowId, Url: input.Url, IdUser: input.IdUser, IdResume: *input.IdResume},
 	).Get(ctx, nil)
 	if err != nil {
 		return err
