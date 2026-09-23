@@ -27,6 +27,15 @@ type AIPIResponse struct {
 	Model        string  `json:"model,omitempty"`
 }
 
+type JevRequest struct {
+	SystemMessage    string `json:"system_message,omitempty"`
+	UserMessage      string `json:"user_message"`
+	ResponseSchema   any    `json:"response_schema,omitempty"`
+	IdUser           uint   `json:"id_user"`
+	IdJobApplication *uint  `json:"id_job_application,omitempty"`
+}
+
 type AIPI interface {
 	GetCompletion(ctx context.Context, req AIPIRequest) (AIPIResponse, error)
+	GetJevCompletion(ctx context.Context, req JevRequest) (AIPIResponse, error)
 }
