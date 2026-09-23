@@ -234,9 +234,6 @@ func sortedApplicationItems(activeApplications map[uint]types.ApplicationQueueIt
 func executeJobApplication(ctx workflow.Context, item types.ApplicationQueueItem) error {
 	input := jobapplication.JobApplicationWorkflowInput{
 		IdJobApplication:      item.IdJobApplication,
-		Url:                   item.Url,
-		IdUser:                item.IdUser,
-		IdResume:              item.IdResume,
 		BrowserPoolWorkflowID: workflow.GetInfo(ctx).WorkflowExecution.ID,
 	}
 
