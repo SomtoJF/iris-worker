@@ -6,15 +6,18 @@ import (
 	"time"
 
 	"github.com/SomtoJF/iris-worker/activity/realtimeevent"
+	browserpooltypes "github.com/SomtoJF/iris-worker/workflow/browserpool/types"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
 
 type InitiateApplicationWorkflowInput struct {
-	Url                   string `json:"url"`
-	IdUser                uint   `json:"id_user"`
-	IdJobApplication      uint   `json:"id_job_application"`
-	ApplicationExternalId string `json:"application_external_id"`
+	Url                   string  `json:"url"`
+	IdUser                uint    `json:"id_user"`
+	IdJobApplication      uint    `json:"id_job_application"`
+	ApplicationExternalId string  `json:"application_external_id"`
+	ApplyAutonomously     bool    `json:"apply_autonomously"`
+	BrowserPoolWorkflowId *string `json:"browser_pool_workflow_id"`
 }
 
 type InitiateApplicationWorkflowResponse struct {
@@ -70,11 +73,31 @@ func InitiateApplicationWorkflow(ctx workflow.Context, input InitiateApplication
 		logger.Error("Failed to publish application details update", "error", err)
 	}
 
+	if input.ApplyAutonomously && input.BrowserPoolWorkflowId != nil {
+		if err := queueAutonomousApplication(ctx, input); err != nil {
+			logger.Error("Failed to signal browser pool application completion", "error", err)
+		}
+	}
+
 	return InitiateApplicationWorkflowResponse{
 		JobTitle:       jobDetails.JobTitle,
 		CompanyName:    jobDetails.CompanyName,
 		JobDescription: jobDetails.JobDescription,
 	}, nil
+}
+
+func queueAutonomousApplication(ctx workflow.Context, input InitiateApplicationWorkflowInput) error {
+	err := workflow.SignalExternalWorkflow(
+		ctx,
+		*input.BrowserPoolWorkflowId,
+		"",
+		browserpooltypes.QUEUE_APPLICATION_SIGNAL_NAME,
+		browserpooltypes.BrowserPoolApplicationSettledPayload{IdJobApplication: input.IdJobApplication},
+	).Get(ctx, nil)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func publishApplicationDetailsUpdated(ctx workflow.Context, input InitiateApplicationWorkflowInput, jobDetails JobDetails) error {
