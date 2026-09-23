@@ -78,11 +78,25 @@ func InitiateApplicationWorkflow(ctx workflow.Context, input InitiateApplication
 
 	if input.ApplyAutonomously {
 		if err := queueAutonomousApplication(ctx, input); err != nil {
-			logger.Error("Failed to signal browser pool application completion", "error", err)
+			logger.Error("Failed to queue autonomous application", "error", err)
+			return InitiateApplicationWorkflowResponse{
+				JobTitle:       jobDetails.JobTitle,
+				CompanyName:    jobDetails.CompanyName,
+				JobDescription: jobDetails.JobDescription,
+			}, err
 		}
 
-		// TODO: Update application status to queued
-		// TODO: Publish notification to client for application status change
+		if err := markApplicationQueued(ctx, input); err != nil {
+			logger.Error("Failed to mark application as queued", "error", err)
+			return InitiateApplicationWorkflowResponse{
+				JobTitle:       jobDetails.JobTitle,
+				CompanyName:    jobDetails.CompanyName,
+				JobDescription: jobDetails.JobDescription,
+			}, err
+		}
+		if err := publishApplicationQueued(ctx, input, jobDetails); err != nil {
+			logger.Error("Failed to publish application queued event", "error", err)
+		}
 	}
 
 	return InitiateApplicationWorkflowResponse{
@@ -90,6 +104,22 @@ func InitiateApplicationWorkflow(ctx workflow.Context, input InitiateApplication
 		CompanyName:    jobDetails.CompanyName,
 		JobDescription: jobDetails.JobDescription,
 	}, nil
+}
+
+func markApplicationQueued(ctx workflow.Context, input InitiateApplicationWorkflowInput) error {
+	return updateJobApplication(ctx, input.IdJobApplication, map[string]interface{}{
+		"status": "queued",
+	})
+}
+
+func publishApplicationQueued(ctx workflow.Context, input InitiateApplicationWorkflowInput, jobDetails JobDetails) error {
+	return workflow.ExecuteActivity(ctx, "PublishRedisEvent", input.IdUser, string(realtimeevent.EventApplicationDetailsUpdated), map[string]interface{}{
+		"id":          input.ApplicationExternalId,
+		"jobTitle":    jobDetails.JobTitle,
+		"companyName": jobDetails.CompanyName,
+		"status":      "queued",
+		"updatedAt":   workflow.Now(ctx).UTC().Format(time.RFC3339),
+	}).Get(ctx, nil)
 }
 
 func queueAutonomousApplication(ctx workflow.Context, input InitiateApplicationWorkflowInput) error {
