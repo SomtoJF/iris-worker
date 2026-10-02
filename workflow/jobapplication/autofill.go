@@ -184,7 +184,7 @@ func callAutofillLLM(ctx workflow.Context, systemPrompt, userPrompt string, idUs
 	llmRequest := types.AIPIRequest{
 		SystemMessage:    systemPrompt,
 		UserMessage:      userPrompt,
-		Model:            "x-ai/grok-4.3",
+		Model:            "deepseek/deepseek-v4-pro",
 		ResponseSchema:   getAutofillResponseSchema(),
 		Temperature:      &temperature,
 		IdUser:           idUser,
