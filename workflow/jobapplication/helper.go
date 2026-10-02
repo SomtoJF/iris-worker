@@ -25,8 +25,7 @@ type TemplateSet struct {
 }
 
 type WorkflowTemplates struct {
-	Planner  TemplateSet
-	Autofill TemplateSet
+	Planner TemplateSet
 }
 
 var Templates WorkflowTemplates
@@ -317,14 +316,6 @@ func SetTemplates() {
 		panic(err)
 	}
 	Templates.Planner.User, err = helper.LoadTemplateWithFuncs("workflow/jobapplication/prompt/user.go.tmpl", funcMap)
-	if err != nil {
-		panic(err)
-	}
-	Templates.Autofill.System, err = helper.LoadTemplate("workflow/jobapplication/prompt/autofill/system.go.tmpl")
-	if err != nil {
-		panic(err)
-	}
-	Templates.Autofill.User, err = helper.LoadTemplate("workflow/jobapplication/prompt/autofill/user.go.tmpl")
 	if err != nil {
 		panic(err)
 	}

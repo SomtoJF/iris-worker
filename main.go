@@ -12,6 +12,7 @@ import (
 	"github.com/SomtoJF/iris-worker/activity/web"
 	"github.com/SomtoJF/iris-worker/common"
 	"github.com/SomtoJF/iris-worker/initializers/env"
+	"github.com/SomtoJF/iris-worker/workflow/autofill"
 	"github.com/SomtoJF/iris-worker/workflow/coverletter"
 	"github.com/SomtoJF/iris-worker/workflow/handleuseraction"
 	"github.com/SomtoJF/iris-worker/workflow/initiateapplication"
@@ -63,7 +64,7 @@ func main() {
 
 func registerJobApplicationWorkflows(w worker.Worker) {
 	w.RegisterWorkflow(jobapplication.JobApplicationWorkflow)
-	w.RegisterWorkflow(jobapplication.AutofillApplicationWorkflow)
+	w.RegisterWorkflow(autofill.AutofillApplicationWorkflow)
 	w.RegisterWorkflow(initiateapplication.InitiateApplicationWorkflow)
 	w.RegisterWorkflow(processresume.ProcessResumeWorkflow)
 	w.RegisterWorkflow(coverletter.CoverLetterWorkflow)
@@ -103,6 +104,7 @@ func registerJobApplicationActivities(w worker.Worker, dependencies common.Depen
 
 func loadTemplates() {
 	jobapplication.SetTemplates()
+	autofill.SetTemplates()
 	coverletter.SetTemplates()
 	handleuseraction.SetTemplates()
 	if err := jobdiscovery.SetTemplates(); err != nil {
