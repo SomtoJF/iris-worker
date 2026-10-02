@@ -18,6 +18,6 @@ func (a *Activity) CallLLM(ctx context.Context, req types.AIPIRequest) (types.AI
 	return a.aipi.GetCompletion(ctx, req)
 }
 
-func (a *Activity) CallJev(ctx context.Context, req types.JevRequest) (types.AIPIResponse, error) {
+func (a *Activity) CallJev(ctx context.Context, req types.JevRequest) (types.JevResponse, error) {
 	return a.aipi.GetJevCompletion(ctx, req)
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/SomtoJF/iris-worker/activity/sqldb"
@@ -14,29 +15,16 @@ import (
 
 // ── LLM filter types ──
 
-type llmFilterPromptData struct {
+type llmFilterDecisionState struct {
 	CompanyName    string
 	JobDescription string
 	Results        []llmFilterResultItem
 }
 
 type llmFilterResultItem struct {
-	Index   int    `json:"index"`
 	Title   string `json:"title"`
 	Link    string `json:"link"`
 	Snippet string `json:"snippet"`
-}
-
-type llmFilterResponse struct {
-	CompanyDomain string                 `json:"company_domain"`
-	Results       []llmFilterResultEntry `json:"results"`
-}
-
-type llmFilterResultEntry struct {
-	Index int    `json:"index"`
-	Title string `json:"title"`
-	Link  string `json:"link"`
-	Valid bool   `json:"valid"`
 }
 
 // ── concurrent scrape types ──
@@ -49,8 +37,9 @@ type indexedScrapeResult struct {
 // ── constants ──
 
 const MAX_SCRAPED_CONTENT_LEN = 3000
-const MAX_PAGES_TO_SCRAPE = 4
+const MAX_PAGES_TO_SCRAPE = 5
 const COVER_LETTER_MODEL = "deepseek/deepseek-v4-pro"
+const companyPageJevThreshold = 0.65
 
 var blockedPathSegments = []string{
 	"investor", "career", "partner", "product", "feature",
@@ -130,7 +119,12 @@ func derefUint(v *uint) uint {
 }
 
 // ── orchestrator ──
-
+/*
+Gather company info from search results and website cache.
+Filter out irrelevant pages with LLM filter.
+Scrape relevant pages.
+Cache pages.
+*/
 func gatherCompanyInfo(ctx workflow.Context, companyName, jobDescription string, idUser uint, idJobApplication *uint) []sqldb.WebsiteCachePage {
 	logger := workflow.GetLogger(ctx)
 
@@ -151,9 +145,6 @@ func gatherCompanyInfo(ctx workflow.Context, companyName, jobDescription string,
 	filtered := programmaticFilterResults(validResults, domain)
 	if len(filtered) == 0 {
 		return nil
-	}
-	if len(filtered) > MAX_PAGES_TO_SCRAPE {
-		filtered = filtered[:MAX_PAGES_TO_SCRAPE]
 	}
 
 	// check cache
@@ -204,78 +195,137 @@ func llmFilterSearchResults(ctx workflow.Context, results []web.SerperOrganicRes
 	logger := workflow.GetLogger(ctx)
 
 	items := make([]llmFilterResultItem, len(results))
+	domainCriteria := make(map[string]string, len(results))
+	resultHosts := make([]string, len(results))
+	resultQuestionKeys := make([]string, len(results))
 	for i, r := range results {
 		items[i] = llmFilterResultItem{
-			Index:   i,
 			Title:   r.Title,
 			Link:    r.Link,
 			Snippet: r.Snippet,
 		}
+		resultQuestionKeys[i] = r.Link
+		host, err := normalizeSearchResultHost(r.Link)
+		if err != nil {
+			continue
+		}
+		resultHosts[i] = host
+		domainCriteria[host] = "The company's official website domain represented by this search result host."
 	}
 
-	promptData := llmFilterPromptData{
+	if len(domainCriteria) == 0 {
+		return "", nil
+	}
+
+	state := llmFilterDecisionState{
 		CompanyName:    companyName,
 		JobDescription: jobDescription,
 		Results:        items,
 	}
 
-	systemPrompt, err := executeTemplateToString(Templates.LLMFilterSystem, promptData)
-	if err != nil {
-		logger.Warn("render llmfilter system prompt failed", "error", err)
-		return "", nil
+	questions := map[string]types.JevQuestion{
+		"company_domain": {
+			Type:         "choice",
+			Instructions: "Which candidate hostname is the company's official primary website? Choose only from the listed candidate hosts. Use the company name, job description, and result metadata to disambiguate.",
+			Criteria:     domainCriteria,
+		},
 	}
-	userPrompt, err := executeTemplateToString(Templates.LLMFilterUser, promptData)
-	if err != nil {
-		logger.Warn("render llmfilter user prompt failed", "error", err)
-		return "", nil
-	}
-
-	llmReq := types.AIPIRequest{
-		SystemMessage:    systemPrompt,
-		UserMessage:      userPrompt,
-		Model:            "google/gemma-4-31b-it:free",
-		ResponseSchema:   getLLMFilterResponseSchema(),
-		IdUser:           idUser,
-		IdJobApplication: idJobApplication,
-	}
-
-	var llmResp types.AIPIResponse
-	if err := workflow.ExecuteActivity(ctx, "CallLLM", llmReq).Get(ctx, &llmResp); err != nil {
-		logger.Warn("LLM filter CallLLM failed", "error", err)
-		return "", nil
-	}
-
-	var parsed llmFilterResponse
-	if err := json.Unmarshal([]byte(llmResp.Content), &parsed); err != nil {
-		logger.Warn("LLM filter unmarshal failed", "error", err)
-		return "", nil
-	}
-
-	var valid []web.SerperOrganicResult
-	for _, entry := range parsed.Results {
-		if entry.Valid && entry.Index >= 0 && entry.Index < len(results) {
-			valid = append(valid, results[entry.Index])
+	for i := range items {
+		if resultHosts[i] == "" {
+			continue
+		}
+		questions[resultQuestionKeys[i]] = types.JevQuestion{
+			Type:         "noul",
+			Instructions: "Does this search result likely lead to a page containing useful company overview, about, mission, vision, values, or culture information? The homepage is useful. News, blogs, jobs, careers indexes, product/pricing pages, and documentation are not useful. Do not reject a page only because it is hosted outside the company's official domain.",
+			Criteria: map[string]string{
+				"true":  "The result is likely a relevant company overview/about/culture page.",
+				"false": "The result is a job listing, careers index, news/blog, product, pricing, documentation, or unrelated page.",
+			},
 		}
 	}
 
-	return strings.TrimSpace(parsed.CompanyDomain), valid
+	var jevResp types.JevResponse
+	if err := workflow.ExecuteActivity(ctx, "CallJev", types.JevRequest{
+		State: map[string]any{
+			"company_name":    state.CompanyName,
+			"job_description": state.JobDescription,
+			"search_results":  state.Results,
+		},
+		Questions:        questions,
+		IdUser:           idUser,
+		IdJobApplication: idJobApplication,
+	}).Get(ctx, &jevResp); err != nil {
+		logger.Warn("JEV company-page filter failed", "error", err)
+		return "", nil
+	}
+
+	domainAnswer, ok := jevResp.Answers["company_domain"]
+	if !ok || domainAnswer.Type != "choice" || domainAnswer.Choice == "" {
+		logger.Warn("JEV company-page filter returned invalid company-domain answer")
+		return "", nil
+	}
+	_, ok = domainCriteria[domainAnswer.Choice]
+	if !ok {
+		logger.Warn("JEV company-page filter selected unknown company domain", "domain", domainAnswer.Choice)
+		return "", nil
+	}
+	domain := domainAnswer.Choice
+
+	var validResults []web.SerperOrganicResult
+	for i, result := range results {
+		if resultHosts[i] == "" {
+			continue
+		}
+		answer, ok := jevResp.Answers[resultQuestionKeys[i]]
+		if !ok || answer.Type != "noul" || answer.Noul == nil || *answer.Noul < 0 || *answer.Noul > 1 {
+			logger.Warn("JEV company-page filter returned invalid result judgment", "url", result.Link)
+			return "", nil
+		}
+		if *answer.Noul >= companyPageJevThreshold {
+			validResults = append(validResults, result)
+		}
+	}
+
+	return domain, validResults
 }
 
+func normalizeSearchResultHost(link string) (string, error) {
+	parsed, err := url.Parse(link)
+	if err != nil {
+		return "", err
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("unsupported URL scheme %q", parsed.Scheme)
+	}
+	host := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
+	host = strings.TrimPrefix(host, "www.")
+	if host == "" {
+		return "", fmt.Errorf("URL has no hostname")
+	}
+	return host, nil
+}
+
+func hostMatchesCompanyDomain(host, companyDomain string) bool {
+	return host == companyDomain || strings.HasSuffix(host, "."+companyDomain)
+}
+
+/* Prioritize official-domain results, discard blocked pages, and cap scrape candidates. */
 func programmaticFilterResults(results []web.SerperOrganicResult, companyDomain string) []web.SerperOrganicResult {
-	var filtered []web.SerperOrganicResult
+	type rankedResult struct {
+		result  web.SerperOrganicResult
+		company bool
+	}
+	ranked := make([]rankedResult, 0, len(results))
 	for _, r := range results {
-		parsed, err := url.Parse(r.Link)
+		host, err := normalizeSearchResultHost(r.Link)
 		if err != nil {
 			continue
 		}
 
-		// domain match
-		host := strings.ToLower(parsed.Hostname())
-		if companyDomain != "" && !strings.Contains(host, strings.ToLower(companyDomain)) {
+		parsed, err := url.Parse(r.Link)
+		if err != nil {
 			continue
 		}
-
-		// blocked path segments
 		pathLower := strings.ToLower(parsed.Path)
 		blocked := false
 		for _, seg := range blockedPathSegments {
@@ -288,7 +338,23 @@ func programmaticFilterResults(results []web.SerperOrganicResult, companyDomain 
 			continue
 		}
 
-		filtered = append(filtered, r)
+		ranked = append(ranked, rankedResult{
+			result:  r,
+			company: companyDomain != "" && hostMatchesCompanyDomain(host, strings.ToLower(companyDomain)),
+		})
+	}
+
+	sort.SliceStable(ranked, func(i, j int) bool {
+		return ranked[i].company && !ranked[j].company
+	})
+
+	if len(ranked) > MAX_PAGES_TO_SCRAPE {
+		ranked = ranked[:MAX_PAGES_TO_SCRAPE]
+	}
+
+	filtered := make([]web.SerperOrganicResult, len(ranked))
+	for i, item := range ranked {
+		filtered[i] = item.result
 	}
 	return filtered
 }
@@ -502,44 +568,6 @@ func splitParagraphs(s string) []string {
 }
 
 // ── response schema ──
-
-func getLLMFilterResponseSchema() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"company_domain": map[string]interface{}{
-				"type":        "string",
-				"description": "The company's primary domain (e.g. stripe.com)",
-			},
-			"results": map[string]interface{}{
-				"type": "array",
-				"items": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"index": map[string]interface{}{
-							"type":        "integer",
-							"description": "Original index of the search result",
-						},
-						"title": map[string]interface{}{
-							"type":        "string",
-							"description": "Title of the search result",
-						},
-						"link": map[string]interface{}{
-							"type":        "string",
-							"description": "URL of the search result",
-						},
-						"valid": map[string]interface{}{
-							"type":        "boolean",
-							"description": "Whether this result is from the company domain and contains relevant company info",
-						},
-					},
-					"required": []string{"index", "title", "link", "valid"},
-				},
-			},
-		},
-		"required": []string{"company_domain", "results"},
-	}
-}
 
 func getCoverLetterResponseSchema() map[string]interface{} {
 	storyThemes := []string{

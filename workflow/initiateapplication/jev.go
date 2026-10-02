@@ -1,9 +1,7 @@
 package initiateapplication
 
 import (
-	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/SomtoJF/iris-worker/aipi/types"
@@ -22,36 +20,52 @@ func gateJobPostingWithJev(ctx workflow.Context, pageText string, userID, applic
 		},
 	})
 
-	var result types.AIPIResponse
+	var result types.JevResponse
 	if err := workflow.ExecuteActivity(jevCtx, "CallJev", types.JevRequest{
-		UserMessage:      pageText,
-		SystemMessage:    "Evaluate the supplied webpage text. Return true for is_valid_job_posting only when this is a single real job posting, not a search page, login page, error page, or company careers index. Return true for has_job_description only when the page contains a substantive role description or responsibilities.",
-		ResponseSchema:   jobPostingGateSchema(),
+		State: map[string]string{
+			"webpage_text": pageText,
+		},
+		Questions: map[string]types.JevQuestion{
+			"is_valid_job_posting": {
+				Type:         "noul",
+				Instructions: "Is this webpage a single real job posting, rather than a search page, login page, error page, or company careers index?",
+				Criteria: map[string]string{
+					"true":  "The page represents one specific real job opening.",
+					"false": "The page is a search page, login page, error page, general careers index, or not a job posting.",
+				},
+			},
+			"has_job_description": {
+				Type:         "noul",
+				Instructions: "Does the page contain a substantive description of the role, responsibilities, or qualifications?",
+				Criteria: map[string]string{
+					"true":  "The page contains meaningful role-specific responsibilities or qualifications.",
+					"false": "The page has no substantive role description, responsibilities, or qualifications.",
+				},
+			},
+		},
 		IdUser:           userID,
 		IdJobApplication: &applicationID,
 	}).Get(ctx, &result); err != nil {
-		return fmt.Errorf("Jev job posting gate: %w", err)
+		return fmt.Errorf("JEV job posting gate: %w", err)
 	}
-	var gate struct {
-		IsValidJobPosting bool `json:"is_valid_job_posting"`
-		HasJobDescription bool `json:"has_job_description"`
+	validPosting, err := jevNoulDecisionIsYes(result.Answers, "is_valid_job_posting", 0.5)
+	if err != nil {
+		return fmt.Errorf("parse JEV job posting decision: %w", err)
 	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(result.Content)), &gate); err != nil {
-		return fmt.Errorf("parse Jev job posting gate: %w", err)
+	hasDescription, err := jevNoulDecisionIsYes(result.Answers, "has_job_description", 0.5)
+	if err != nil {
+		return fmt.Errorf("parse JEV job description decision: %w", err)
 	}
-	if !gate.IsValidJobPosting || !gate.HasJobDescription {
+	if !validPosting || !hasDescription {
 		return temporal.NewNonRetryableApplicationError("invalid job posting", "InvalidJobPosting", nil)
 	}
 	return nil
 }
 
-func jobPostingGateSchema() map[string]any {
-	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"is_valid_job_posting": map[string]any{"type": "boolean"},
-			"has_job_description":  map[string]any{"type": "boolean"},
-		},
-		"required": []string{"is_valid_job_posting", "has_job_description"},
+func jevNoulDecisionIsYes(answers map[string]types.JevAnswer, name string, threshold float64) (bool, error) {
+	answer, ok := answers[name]
+	if !ok || answer.Type != "noul" || answer.Noul == nil || *answer.Noul < 0 || *answer.Noul > 1 {
+		return false, fmt.Errorf("missing or invalid Noul answer %q", name)
 	}
+	return *answer.Noul >= threshold, nil
 }
