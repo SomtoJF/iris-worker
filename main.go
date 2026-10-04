@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log"
+	"os"
 
 	"github.com/SomtoJF/iris-worker/activity/browser"
 	"github.com/SomtoJF/iris-worker/activity/captcha"
@@ -13,6 +16,7 @@ import (
 	"github.com/SomtoJF/iris-worker/common"
 	"github.com/SomtoJF/iris-worker/initializers/env"
 	"github.com/SomtoJF/iris-worker/workflow/autofill"
+	"github.com/SomtoJF/iris-worker/workflow/browserpool"
 	"github.com/SomtoJF/iris-worker/workflow/coverletter"
 	"github.com/SomtoJF/iris-worker/workflow/handleuseraction"
 	"github.com/SomtoJF/iris-worker/workflow/initiateapplication"
@@ -21,6 +25,8 @@ import (
 	"github.com/SomtoJF/iris-worker/workflow/processresume"
 	"github.com/SomtoJF/iris-worker/workflow/submitapplication"
 	"github.com/SomtoJF/iris-worker/workflow/summarizeissue"
+	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/worker"
 )
 
@@ -55,6 +61,10 @@ func main() {
 	registerJobApplicationWorkflows(w)
 	registerJobApplicationActivities(w, dependencies)
 
+	if err := startBrowserPoolWorkflow(temporalClient, os.Getenv("BROWSER_POOL_WORKFLOW_ID")); err != nil {
+		log.Fatal(err)
+	}
+
 	// Start listening to the Task Queue.
 	err = w.Run(worker.InterruptCh())
 	if err != nil {
@@ -64,6 +74,7 @@ func main() {
 
 func registerJobApplicationWorkflows(w worker.Worker) {
 	w.RegisterWorkflow(jobapplication.JobApplicationWorkflow)
+	w.RegisterWorkflow(browserpool.BrowserPoolWorkflow)
 	w.RegisterWorkflow(autofill.AutofillApplicationWorkflow)
 	w.RegisterWorkflow(initiateapplication.InitiateApplicationWorkflow)
 	w.RegisterWorkflow(processresume.ProcessResumeWorkflow)
@@ -110,4 +121,30 @@ func loadTemplates() {
 	if err := jobdiscovery.SetTemplates(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func startBrowserPoolWorkflow(temporalClient client.Client, workflowID string) error {
+	if workflowID == "" {
+		return fmt.Errorf("BROWSER_POOL_WORKFLOW_ID environment variable is not set")
+	}
+
+	_, err := temporalClient.ExecuteWorkflow(
+		context.Background(),
+		client.StartWorkflowOptions{
+			ID:        workflowID,
+			TaskQueue: string(JobApplicationTaskQueueName),
+		},
+		browserpool.BrowserPoolWorkflow,
+		browserpool.BrowserPoolWorkflowInput{},
+	)
+	if temporal.IsWorkflowExecutionAlreadyStartedError(err) {
+		log.Printf("Browser pool workflow %q is already running", workflowID)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("start browser pool workflow %q: %w", workflowID, err)
+	}
+
+	log.Printf("Started browser pool workflow %q", workflowID)
+	return nil
 }

@@ -107,7 +107,7 @@ func handleCancelOrTimeout(
 	return true, nil
 }
 
-const SESSION_TIMEOUT = 23*time.Hour + 50*time.Minute
+const SESSION_TIMEOUT = 30 * time.Minute
 
 func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowInput) error {
 	logger := workflow.GetLogger(ctx)

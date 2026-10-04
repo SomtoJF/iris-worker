@@ -11,8 +11,10 @@ Kernel is a browser provider, not the application scheduler. The existing `Brows
 1. `POST /jobs/apply` resolves the user's resume, writes a `pending` application row and a stable application workflow ID, then starts `InitiateApplicationWorkflow` with autonomous apply enabled. It returns `202` without waiting for application completion.
 2. `InitiateApplicationWorkflow` loads the application, scrapes and validates the posting, extracts and persists its details, signals `queue_application` to the configured browser-pool workflow, then marks the row `queued`.
 3. `BrowserPoolWorkflow` deduplicates by application ID, queues requests, and uses a deterministic semaphore capped at four active applications. For each available slot it starts a `JobApplicationWorkflow` child with the application workflow ID and waits for its completion.
-4. Each `JobApplicationWorkflow` creates a Temporal session and drives browser activities through the worker's browser dependencies. It has a 30-minute child execution timeout and a 23-hour-50-minute session/soft timeout. It persists terminal application state and sends `application_settled` to the pool when it exits.
+4. Each `JobApplicationWorkflow` creates a Temporal session and drives browser activities through the worker's browser dependencies. Its child execution timeout and session/soft timeout are both 30 minutes. It persists terminal application state and sends `application_settled` to the pool when it exits.
 5. The API cancellation endpoint first conditionally changes an eligible application row to `cancelled`, then asynchronously signals `cancel_application` to the pool. The pool removes queued work or forwards `CANCEL_APPLICATION` to the active application workflow.
+
+The worker registers `BrowserPoolWorkflow` on the `job-application` task queue and starts it at startup using `BROWSER_POOL_WORKFLOW_ID`, which must match the API configuration. Additional worker replicas tolerate the pool already running.
 
 The browser pool rolls over after seven days or when its history exceeds 10,000 events or 10 MiB, whichever comes first. It drains signals already waiting in its channels, then uses Continue-As-New with:
 
@@ -49,7 +51,7 @@ Do not treat the pool's concurrency slot as proof that a remote browser exists. 
 
 Temporal workflow state is reconstructed by replaying its event history after a worker/process restart. The pool's in-memory queue, deduplication set, active map, semaphore, and timers are deterministic workflow state; they are not an external in-memory browser pool. A normal worker restart should therefore resume the same workflow execution and continue from history. Activity side effects still need idempotency and retries.
 
-A workflow execution that is failed, terminated, or otherwise closed is different from a worker restart: replay will not revive a closed execution. The current pool code has no recovery loop that discovers/restarts a closed pool or reconciles queued database rows. The API also relies on a configured pool workflow ID, and the inspected worker `main.go` does not register or start `BrowserPoolWorkflow`. Deployment must provide a registered pool worker/launcher and a recovery/reconciliation strategy before this is considered fault tolerant.
+A workflow execution that is failed, terminated, or otherwise closed is different from a worker restart: replay will not revive a closed execution. The current pool code has no recovery loop that discovers/restarts a closed pool or reconciles queued database rows. The API and worker rely on the same configured pool workflow ID. Worker startup starts the pool if it is not already running; a worker restart resumes the same open execution, while a closed execution can be started again. This does not provide reconciliation for queued database rows or failed signals.
 
 If an activity/worker dies while a Kernel browser is open, Temporal can retry the activity/workflow, but the external browser is not part of workflow history. Kernel session lookup, reconnect, expiry, and orphan cleanup need defined behavior. Never assume browser state can be recreated just by replaying workflow code.
 
@@ -63,7 +65,7 @@ Signals arriving at the rollover boundary are the key race: only signals drained
 
 ### Application timeout and rollover interaction
 
-Pool rollover does not extend or reset an active application's timeout. An application child can outlive multiple pool runs, while its own execution/session timeout continues. The current child execution timeout is 30 minutes, despite the application's session/soft timeout being 23 hours 50 minutes; align these values intentionally or document that the child execution timeout is the effective upper bound.
+Pool rollover does not extend or reset an active application's timeout. An application child can outlive multiple pool runs, while its own execution/session timeout continues. Both limits are 30 minutes, so this is the effective upper bound for an application.
 
 ### Cancellation cases
 
@@ -85,7 +87,7 @@ Queue delivery is currently signal-based rather than transactional with the data
 
 ## Rollout and validation
 
-1. Confirm the deployment starts a registered `BrowserPoolWorkflow` under the workflow ID configured in the API; add a health/recovery check for a missing or closed pool.
+1. Confirm the worker and API use the same `BROWSER_POOL_WORKFLOW_ID`; worker startup registers and starts the pool, but a health/recovery check for a missing or closed pool is still useful.
 2. Implement and test Kernel browser activities with per-application session identity, cleanup, reconnect, and TTL behavior. Keep Go-rod selectable for local development.
 3. Add workflow tests for worker replay, enqueue deduplication, Continue-As-New with both queued and active applications, late completion signals, and each cancellation race above.
 4. Run a staged rollout with a small concurrency cap. Compare browser creation/cleanup, application outcomes, leaked sessions, and queue/status reconciliation before increasing concurrency.
@@ -93,7 +95,5 @@ Queue delivery is currently signal-based rather than transactional with the data
 
 ## Open decisions
 
-- Is `BrowserPoolWorkflow` started by a separate service today, or should the worker register and start it?
-- Should the 30-minute child execution timeout be raised to match the intended application/session limit?
 - What durable mechanism will retry failed enqueue/cancel signals and reconcile nonterminal database rows?
 - What Kernel session lookup, reuse, and TTL guarantees are available for recovery after worker crashes?
