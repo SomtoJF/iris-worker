@@ -59,6 +59,11 @@ func InitiateApplicationWorkflow(ctx workflow.Context, input InitiateApplication
 		return InitiateApplicationWorkflowResponse{}, err
 	}
 
+	if err := gateJobPostingWithJev(ctx, pageText, application.UserId, application.IdJobApplication); err != nil {
+		logger.Error("Jev job posting gate failed", "error", err)
+		return InitiateApplicationWorkflowResponse{}, err
+	}
+
 	details, err := extractJobDetailsFromText(ctx, pageText, application.UserId, application.IdJobApplication)
 	if err != nil {
 		logger.Error("Failed to extract job details", "error", err)

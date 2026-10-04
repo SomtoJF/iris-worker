@@ -41,14 +41,15 @@ const (
 )
 
 type JobApplication struct {
-	IdJobApplication      uint                 `gorm:"primaryKey;autoIncrement;column:id_job_application" json:"_"`
-	IdExternal            uuid.UUID            `gorm:"unique;type:uuid;default:gen_random_uuid()" json:"id"`
-	UserId                uint                 `gorm:"column:id_user;not null;index"`
-	User                  User                 `gorm:"foreignKey:UserId;references:IdUser"`
-	ResumeId              uint                 `gorm:"column:id_resume;not null"`
-	Resume                Resume               `gorm:"foreignKey:ResumeId;references:IdResume"`
-	JobApplicationData    *JobApplicationData  `gorm:"foreignKey:JobApplicationId;references:IdJobApplication"`
-	CoverLetter           *CoverLetter         `gorm:"foreignKey:JobApplicationId;references:IdJobApplication"`
+	IdJobApplication   uint                `gorm:"primaryKey;autoIncrement;column:id_job_application" json:"_"`
+	IdExternal         uuid.UUID           `gorm:"unique;type:uuid;default:gen_random_uuid()" json:"id"`
+	UserId             uint                `gorm:"column:id_user;not null;index"`
+	User               User                `gorm:"foreignKey:UserId;references:IdUser"`
+	ResumeId           uint                `gorm:"column:id_resume;not null"`
+	Resume             Resume              `gorm:"foreignKey:ResumeId;references:IdResume"`
+	JobApplicationData *JobApplicationData `gorm:"foreignKey:JobApplicationId;references:IdJobApplication"`
+	CoverLetter        *CoverLetter        `gorm:"foreignKey:JobApplicationId;references:IdJobApplication"`
+	// application status
 	Status                JobApplicationStatus `gorm:"type:varchar(50);not null;index"`
 	ResponseStatus        ResponseStatus       `gorm:"type:varchar(50);not null;index;default:none"`
 	WorkflowID            *string              `gorm:"type:text;default:NULL"`

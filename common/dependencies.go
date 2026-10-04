@@ -15,7 +15,6 @@ import (
 	"github.com/SomtoJF/iris-worker/initializers/temporal"
 	s3pkg "github.com/SomtoJF/iris-worker/pkg/s3"
 	"github.com/posthog/posthog-go"
-	"github.com/revrost/go-openrouter"
 	"go.temporal.io/sdk/client"
 	"gorm.io/gorm"
 )
@@ -83,7 +82,6 @@ func MakeDependencies() (Dependencies, error) {
 	}
 
 	fs := fs.NewTemporaryFilesystem()
-	openrouterClient := openrouter.NewClient(apiKey)
 	// browserClient, err := browserfactory.NewBrowserFactory(fs)
 	// if err != nil {
 	// 	return nil, fmt.Errorf("browser: %w", err)
@@ -130,7 +128,7 @@ func MakeDependencies() (Dependencies, error) {
 
 	return &dependencies{
 		db:         db,
-		aipiClient: aipi.NewAIPIClient(openrouterClient, db),
+		aipiClient: aipi.NewAIPIClient(apiKey, db),
 		// TODO: browserClient : browserClient
 		browserClient:  nil,
 		fs:             fs,

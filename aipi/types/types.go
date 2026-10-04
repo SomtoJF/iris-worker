@@ -27,6 +27,42 @@ type AIPIResponse struct {
 	Model        string  `json:"model,omitempty"`
 }
 
+type JevRequest struct {
+	State            any                    `json:"state"`
+	Questions        map[string]JevQuestion `json:"questions"`
+	IdUser           uint                   `json:"id_user"`
+	IdJobApplication *uint                  `json:"id_job_application,omitempty"`
+}
+
+type JevQuestion struct {
+	Type         string `json:"type"`
+	Instructions string `json:"instructions"`
+	Criteria     any    `json:"criteria"`
+}
+
+type JevResponse struct {
+	ID       string               `json:"id"`
+	Model    string               `json:"model"`
+	Provider string               `json:"provider"`
+	Answers  map[string]JevAnswer `json:"answers"`
+	Usage    JevUsage             `json:"usage"`
+}
+
+type JevAnswer struct {
+	Type          string             `json:"type"`
+	Noul          *float64           `json:"noul,omitempty"`
+	Choice        string             `json:"choice,omitempty"`
+	Confidence    *float64           `json:"confidence,omitempty"`
+	Probabilities map[string]float64 `json:"probabilities,omitempty"`
+}
+
+type JevUsage struct {
+	InputTokens  int     `json:"input_tokens"`
+	OutputTokens int     `json:"output_tokens"`
+	Cost         float64 `json:"cost"`
+}
+
 type AIPI interface {
 	GetCompletion(ctx context.Context, req AIPIRequest) (AIPIResponse, error)
+	GetJevCompletion(ctx context.Context, req JevRequest) (JevResponse, error)
 }
