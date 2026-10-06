@@ -2,18 +2,23 @@
 
 ## Purpose and scope
 
-Replace the go-rod-specific `browserfactory` boundary with a provider-neutral Go `browser` package. Keep go-rod as the current provider and make Kernel a future provider behind the same interface. This document is the design and migration plan; it does not implement the refactor.
+Replace the go-rod-specific `browserfactory` boundary with a provider-neutral Go `browser` package. Keep go-rod as the selected provider and Kernel available behind the same interface.
+
+## Implementation status
+
+The provider-neutral interface, isolated Rod and Kernel clients, SQL-backed browser/profile/Vault/session records, encrypted Live View persistence, authenticated Live View API, and read-only client view are implemented. Durable user-action submission stores encrypted answers and requeues through the browser pool; the pool also prevents concurrent applications for the same user. Q&A deduplication uses validated JEV decisions with raw-Q&A fallback.
+
+Kernel is not selected by worker dependency wiring. Its browser startup attaches a leased profile and Vault reference, but Managed Auth lifecycle, credential collection/fill, and `NEEDS_AUTH` handoff are not wired. Browser replay catch-up is implemented for safe, semantically identified operations in both providers. It fails closed on missing/ambiguous targets, non-applied or non-replay-safe rows, and uncertain execution; it does not guarantee arbitrary sites can be replayed. Durable user-action resumes still reload the application URL and submit answers as planner context rather than restoring arbitrary paused page state.
 
 The required lifecycle is one isolated browser per job application. The application owns that browser from `OpenWebpage` until application completion, failure, cancellation, timeout, or a user-action pause. Closing the application browser closes the whole browser, not only its current page.
 
 ## Current constraints
 
-- `browserfactory.BrowserClient` exposes `*rod.Browser`, `*rod.Page`, `*rod.Element`, and go-rod tagged-node values.
-- `activity/browser` uses go-rod and CDP types directly for interaction, screenshots, CAPTCHA handling, rendered scraping, and submit detection. Moving only `browserfactory` would not make the activities provider-neutral.
-- The current browser factory shares one Rod browser and uses incognito contexts. That does not match the intended application-scoped lifecycle.
-- Browser activities already carry a `WorkflowID`; adapt that field to the persisted logical application browser UUID so existing payload shapes can remain stable.
-- Temporal activity names and payloads are persisted in workflow histories; changing them needs compatibility handling.
-- `BrowserPoolWorkflow` schedules applications and caps active jobs. It is not a pool of browser instances and remains separate from either browser provider.
+- `browserfactory` remains as legacy code, but the registered `activity/browser` activities use the provider-neutral `BrowserClient`.
+- Rod keeps private browser/page handles in a per-application client; it is process-local and is not recoverable on another worker.
+- Browser activity payloads retain `WorkflowID`, which now carries the persisted logical application browser UUID.
+- Temporal activity names and payloads are persisted in workflow histories; version gates preserve compatibility for changed workflow behavior.
+- `BrowserPoolWorkflow` schedules applications and caps active jobs. It is not a pool of browser instances and serializes active applications per user.
 
 ## Package and file structure
 
@@ -92,7 +97,7 @@ type Config struct {
 func NewKernelBrowserClient(cfg Config) (*KernelBrowserClient, error)
 ```
 
-`common.MakeDependencies()` stays zero-argument. For now, dependency construction explicitly calls `browser.NewBrowserClient(browser.ClientTypeRod, cfg)`. Do not add environment-based provider selection yet. Keep the client-type factory ready for the later Kernel cutover. Only when `GetBrowserProvider()` reports Kernel should startup/session code create or load Kernel profiles, Managed Auth connections, and Vaults. Kernel credentials must come from the configured secret source and must never enter workflow input or logs.
+`common.MakeDependencies()` stays zero-argument and constructs the configured browser client. Worker registration passes `GetBrowserProvider()` to the SQL activities, so application browser IDs are looked up and created per application/provider pair. Switching providers starts a separate browser session and does not migrate the previous provider's browser state. Only when `GetBrowserProvider()` reports Kernel should startup/session code create or load Kernel profiles, Managed Auth connections, and Vaults. Kernel credentials must come from the configured secret source and must never enter workflow input or logs.
 
 ## Shared types and browser interface
 
@@ -236,7 +241,7 @@ if stored.Found {
 }
 ```
 
-`GetApplicationBrowserID` should return a `{Found, ID}` result; database failures remain explicit activity errors. `CreateApplicationBrowserID` must insert-if-absent and return the persisted winner to handle duplicate starts. When a user-action pause ends one workflow and the application is requeued under a new execution, `GetApplicationBrowserID` finds and reuses the saved ID; do not generate a new logical browser identity. The actual Kernel browser `SessionID` is a separate value and changes whenever the remote browser is recreated.
+`GetApplicationBrowserID` should return a `{Found, ID}` result for the selected provider; database failures remain explicit activity errors. `CreateApplicationBrowserID` must insert-if-absent and return the persisted winner to handle duplicate starts. When a user-action pause ends one workflow and the application is requeued under a new execution, `GetApplicationBrowserID` finds and reuses the saved ID for that provider. Switching providers resolves a distinct provider-scoped ID and starts fresh; it does not migrate browser state. The actual Kernel browser `SessionID` is a separate value and changes whenever the remote browser is recreated.
 
 ### Proposed database records
 
@@ -248,7 +253,9 @@ All table names remain provider-neutral. Each provider-backed record has a `prov
 | `browser_vault` | `id_browser_vault`, `id_external`, `id_user`, `provider`, `provider_vault_id`, `provider_vault_name`, timestamps, `deleted_at` | Unique `(id_user, provider)`. Stores provider resource references only, never credentials. |
 | `browser_auth_connection` | `id_browser_auth_connection`, `id_external`, `id_browser_profile`, `provider`, `provider_connection_id`, `domain`, `status`, `can_reauth`, `can_reauth_reason`, timestamps | Unique `(id_browser_profile, provider, domain)`. A profile may hold multiple managed-auth connections, usually one per domain. |
 | `browser_session` | `id_browser_session`, `id_external`, `id_job_application`, `application_browser_id` UUID, `provider`, optional profile/vault FKs, current provider session ID, `status`, active `replay_generation`, encrypted `browser_live_view_url_ciphertext`, committed cursor (`checkpoint_created_at`, `checkpoint_mutation_id`), pending cursor (`pending_checkpoint_created_at`, `pending_checkpoint_mutation_id`), owner/lease fields, started/closed/expiry timestamps, standard timestamps | Unique `(id_job_application, provider)` and unique `application_browser_id`. One logical row survives requeues; replace provider session ID per browser incarnation. A new explicit retry increments `replay_generation`. Clear provider ID and Live View ciphertext after close; retain identity, generation, and committed checkpoint. |
-| `browser_mutation_changelog` | `id_browser_mutation_changelog` numeric PK, `id_external` UUID, `id_browser_session` FK, `provider`, `replay_generation`, `operation`, encrypted/redacted JSONB `arguments`, JSONB `context` (URL and target/precondition data), per-generation `idempotency_key`, `status` (`pending`, `applied`, `failed`, `reconcile_required`), sanitized `result`, `created_at`, `updated_at`, optional `completed_at` | One row per action. Unique `(id_browser_session, replay_generation, idempotency_key)`. Fetch applied rows for the active generation ordered by `created_at, id_browser_mutation_changelog`; the PK breaks timestamp ties. |
+| `browser_mutation_changelog` | `id_browser_mutation_changelog` numeric PK, `id_external` UUID, `id_browser_session` FK, `provider`, `replay_generation`, `operation`, encrypted/redacted JSONB `arguments`, typed JSONB `context` and `result`, per-generation `idempotency_key`, `status` (`pending`, `applied`, `failed`, `reconcile_required`), `created_at`, `updated_at`, optional `completed_at` | One row per action. Unique `(id_browser_session, replay_generation, idempotency_key)`. Fetch applied rows for the active generation ordered by `created_at, id_browser_mutation_changelog`; the PK breaks timestamp ties. |
+
+The JSONB schema is defined by `model.BrowserMutationContext` and `model.BrowserMutationResult` in the API. Context fields: optional `url`, optional `target` (`role`, `name`, `label`, `selector`), optional `element_index` and `file_input_index`, and `replay_safe`. The URL is the destination for `navigate`; when supplied for another operation, it is the current-page precondition. Result fields: `outcome` (`applied`, `failed`, or `uncertain`), `replay_safe`, and optional `replay_session_id`. The session ID makes successful replay activities idempotent if Temporal retries after the changelog update; interrupted replay claims from a replaced provider session can be safely retried on the new browser. The worker serializes these structs directly; add schema changes to the API model rather than writing ad-hoc JSON maps.
 
 Implement these as generic GORM models (e.g. `BrowserProfile`, `BrowserSession`) with `TableName()` matching the names above. Add the new models to the worker's schema initialization/migration path and honor repository migration rules. The profile unique index is intentionally composite so the same user can have a Rod and a Kernel row while never having two profiles for either provider.
 
@@ -295,7 +302,11 @@ For each replayable mutation:
 
 Serialize mutation execution and changelog writes per browser session so `created_at` and the monotonic PK preserve action order. Do not blindly repeat a `pending` non-idempotent operation after a crash; reconcile page/application state first, then mark it applied, failed, or requiring reconciliation. Prefer semantic role/name/label/selector information over screenshot indices and include the current URL or other replay preconditions. Store durable file references, not transient worker paths. Never persist Vault values, passwords, or tokens; encrypt replayable user-provided values at rest.
 
-During catch-up, fetch the current replay generation's applied rows in timestamp/PK order. Execute one mutation, then run CAPTCHA detection before the next row. If a CAPTCHA is detected, stop catch-up and route through the existing challenge handling/user-action flow; never replay CAPTCHA injection or submit operations from history.
+During catch-up, fetch all rows for the active generation in timestamp/PK order after the Kernel profile checkpoint (or from the generation start for Rod). Stop at any row that is not `applied` and replay-safe; do not skip it or continue past it. Before each mutation, capture a fresh screenshot and tagged accessibility state. JEV may verify target presence/index drift, but the worker must then resolve exactly one current element using the stored role/name/label/selector and submit metadata. Never use the prior numeric index as a fallback. Execute one mutation, detect/solve CAPTCHA before the next row, then wait a Temporal-recorded random 1–5 seconds. JEV final-state checks use sanitized node/file-input metadata, expected form-field labels and a query/fragment-stripped URL; never send field values or raw file HTML. Replay execution errors are diagnosed with JEV but always stop catch-up.
+
+The session's `replay_pending` marker is set when a provider browser incarnation is created and cleared only after catch-up and final verification complete. This makes open-activity retries resume pending catch-up instead of mistaking a just-created browser for an already-restored one. An explicit retry starts a new generation and clears the prior profile checkpoint cursor.
+
+Replayable operations are navigation, scroll, and click/text input with a stable semantic target. File uploads currently retain worker-local paths and are not replay-safe; catch-up stops at such rows until a durable file-reference design is added. Password fields and submit-target clicks are not replayed.
 
 Treat the profile snapshot and action log as complementary recovery layers:
 
@@ -352,6 +363,8 @@ func (h *Handler) GetApplicationLiveViewURL(ctx context.Context, idExternal uuid
 ```
 
 The API reads/decrypts the active session's URL only after checking `JobApplication.UserId` against the authenticated principal. The frontend listens for `KERNEL_PLAYING` to confirm a useful live connection rather than treating `KERNEL_CONNECTED` as proof that frames are visible.
+
+The worker and API must share `BROWSER_DATA_ENCRYPTION_KEY`, a base64-encoded 32-byte AES key, to encrypt/decrypt the bearer URL. Generate it once with `openssl rand -base64 32` and provision it through each service's secret manager; never commit the generated value. The browser-session store binds ciphertext to the logical application browser UUID as authenticated data, so ciphertext cannot be moved to another session.
 
 ## Temporal activity contract
 
@@ -444,7 +457,7 @@ The Temporal `BrowserPoolWorkflow` remains the concurrency control for applicati
 - Free-plan configuration never tries to create a configurable geo proxy; logs and docs do not imply the default stealth proxy matches profile location.
 - Kernel concurrency/rate-limit failures surface as activity errors and do not leave registry rows or remote browsers orphaned.
 - Mutation rows are one-action-per-record, ordered by `(created_at, id_browser_mutation_changelog)`, and idempotent within a replay generation. Pending operations are reconciled rather than blindly retried.
-- Catch-up detects CAPTCHA between mutations and excludes CAPTCHA injections, explicit submits, and submit-target clicks from replay.
+- Catch-up screenshots/tags before every mutation, resolves unique semantic targets without stale-index fallback, checks CAPTCHA between rows, paces each row randomly 1–5 seconds, and fails closed on uncertain rows or actions.
 - Explicit retry after terminal failure starts a new replay generation and never replays failed-generation mutations; Temporal retries and user-action resumes retain the current generation.
 - A user-action pause closes the browser, releases the scheduler slot, and requeues idempotently after input; profile leases prevent concurrent Kernel profile writers.
 - JEV-based Q&A dedup merges only validated duplicate decisions and preserves raw Q&A on JEV failure.

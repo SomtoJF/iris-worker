@@ -6,14 +6,16 @@ import (
 	"log/slog"
 	"os"
 
+	sqldbActivity "github.com/SomtoJF/iris-worker/activity/sqldb"
 	"github.com/SomtoJF/iris-worker/aipi"
-	"github.com/SomtoJF/iris-worker/browserfactory"
+	"github.com/SomtoJF/iris-worker/browser"
 	"github.com/SomtoJF/iris-worker/initializers/fs"
 	posthogInit "github.com/SomtoJF/iris-worker/initializers/posthog"
 	"github.com/SomtoJF/iris-worker/initializers/s3"
 	"github.com/SomtoJF/iris-worker/initializers/sqldb"
 	"github.com/SomtoJF/iris-worker/initializers/temporal"
 	s3pkg "github.com/SomtoJF/iris-worker/pkg/s3"
+	"github.com/google/uuid"
 	"github.com/posthog/posthog-go"
 	"go.temporal.io/sdk/client"
 	"gorm.io/gorm"
@@ -22,7 +24,7 @@ import (
 type Dependencies interface {
 	GetDB() *gorm.DB
 	GetAIPIClient() *aipi.AIPIClient
-	GetBrowserClient() browserfactory.BrowserClient
+	GetBrowserClient() browser.BrowserClient
 	GetS3Manager() *s3pkg.S3Manager
 	GetTemporalClient() client.Client
 	GetPosthogClient() posthog.Client
@@ -33,7 +35,7 @@ type dependencies struct {
 	db             *gorm.DB
 	temporalClient client.Client
 	aipiClient     *aipi.AIPIClient
-	browserClient  browserfactory.BrowserClient
+	browserClient  browser.BrowserClient
 	fs             *fs.TemporaryFileSystem
 	s3Manager      *s3pkg.S3Manager
 	posthogClient  posthog.Client
@@ -43,7 +45,7 @@ func (d *dependencies) GetAIPIClient() *aipi.AIPIClient {
 	return d.aipiClient
 }
 
-func (d *dependencies) GetBrowserClient() browserfactory.BrowserClient {
+func (d *dependencies) GetBrowserClient() browser.BrowserClient {
 	return d.browserClient
 }
 
@@ -82,10 +84,23 @@ func MakeDependencies() (Dependencies, error) {
 	}
 
 	fs := fs.NewTemporaryFilesystem()
-	// browserClient, err := browserfactory.NewBrowserFactory(fs)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("browser: %w", err)
-	// }
+	sessionStore, err := sqldbActivity.NewBrowserSessionStore(db)
+	if err != nil {
+		fs.Cleanup()
+		return nil, fmt.Errorf("browser session store: %w", err)
+	}
+
+	workerID := uuid.NewString()
+	browserClient, err := browser.NewBrowserClient(browser.ClientTypeKernel, browser.Config{
+		SessionStore: sessionStore,
+		TempFS:       fs,
+		WorkerID:     workerID,
+		KernelAPIKey: os.Getenv("KERNEL_API_KEY"),
+	})
+	if err != nil {
+		fs.Cleanup()
+		return nil, fmt.Errorf("browser: %w", err)
+	}
 
 	s3Client, err := s3.InitializeS3()
 	if err != nil {
@@ -127,10 +142,9 @@ func MakeDependencies() (Dependencies, error) {
 	}
 
 	return &dependencies{
-		db:         db,
-		aipiClient: aipi.NewAIPIClient(apiKey, db),
-		// TODO: browserClient : browserClient
-		browserClient:  nil,
+		db:             db,
+		aipiClient:     aipi.NewAIPIClient(apiKey, db),
+		browserClient:  browserClient,
 		fs:             fs,
 		s3Manager:      s3Manager,
 		temporalClient: temporalClient,

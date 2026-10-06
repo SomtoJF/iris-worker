@@ -14,7 +14,6 @@ import (
 	"github.com/SomtoJF/iris-worker/activity/realtimeevent"
 	"github.com/SomtoJF/iris-worker/activity/sqldb"
 	"github.com/SomtoJF/iris-worker/aipi/types"
-	"github.com/SomtoJF/iris-worker/browserfactory"
 	"github.com/SomtoJF/iris-worker/helper"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
@@ -43,6 +42,7 @@ const signalName = "USER_ACTION_RESULT"
 func HandleUserActionWorkflow(ctx workflow.Context, input HandleUserActionWorkflowInput) (map[string]interface{}, error) {
 	logger := workflow.GetLogger(ctx)
 	logger.Info("HandleUserActionWorkflow started", "input", input)
+	durablePauseVersion := workflow.GetVersion(ctx, "durable-user-action-pause", workflow.DefaultVersion, 1)
 
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 5 * time.Minute,
@@ -91,14 +91,23 @@ func HandleUserActionWorkflow(ctx workflow.Context, input HandleUserActionWorkfl
 	}
 
 	// Create user action record in DB
-	userAction, err := createUserAction(ctx, sqldb.CreateUserActionInput{
+	createInput := sqldb.CreateUserActionInput{
 		UserId:           input.IdUser,
 		JobApplicationId: input.IdJobApplication,
 		UserActionType:   input.UserAction,
 		ActionDetails:    formDescription,
 		WorkflowID:       childWorkflowID,
 		Layout:           layout,
-	})
+	}
+	var userAction sqldb.UserAction
+	if durablePauseVersion == 1 {
+		userAction, err = createDurableUserAction(ctx, sqldb.CreateDurableUserActionInput{
+			CreateUserActionInput: createInput,
+			ApplicationBrowserID:  input.WorkflowID,
+		})
+	} else {
+		userAction, err = createUserAction(ctx, createInput)
+	}
 	if err != nil {
 		logger.Error("Failed to create user action record", "error", err)
 		return nil, err
@@ -118,6 +127,25 @@ func HandleUserActionWorkflow(ctx workflow.Context, input HandleUserActionWorkfl
 	}); err != nil {
 		logger.Error("Failed to notify user", "error", err)
 		return nil, err
+	}
+
+	if durablePauseVersion == 1 {
+		if err := workflow.ExecuteActivity(ctx, "ClosePage", browser.ClosePageInput{
+			WorkflowID: input.WorkflowID,
+		}).Get(ctx, nil); err != nil {
+			logger.Error("Failed to close browser for durable user-action pause", "error", err)
+			return nil, err
+		}
+		if err := workflow.ExecuteActivity(ctx, "CommitUserActionCheckpoint", sqldb.CommitUserActionCheckpointInput{
+			IdUserAction: userAction.IdUserAction,
+		}).Get(ctx, nil); err != nil {
+			logger.Error("Failed to commit durable user-action checkpoint", "error", err)
+			return nil, err
+		}
+		return map[string]interface{}{
+			"user_action_paused": true,
+			"user_action_id":     userAction.IdUserAction,
+		}, nil
 	}
 
 	// Wait for user action signal (indefinitely; canceled when parent closes)
@@ -209,7 +237,7 @@ func buildUserActionLayout(ctx workflow.Context, screenshot browser.TakeScreensh
 	return formDescription, layout, nil
 }
 
-func buildUserActionUserMessage(actionDetails string, taggedNodes []browserfactory.SerializableTaggedNode) string {
+func buildUserActionUserMessage(actionDetails string, taggedNodes []browser.SerializableTaggedNode) string {
 	var b strings.Builder
 	b.WriteString("Analyze the screenshot and return the form description and layout for this user action.\n")
 	b.WriteString("Action details: ")
@@ -282,6 +310,12 @@ func choiceFieldsMissingOptions(layout sqldb.UserActionLayout) []string {
 func createUserAction(ctx workflow.Context, input sqldb.CreateUserActionInput) (sqldb.UserAction, error) {
 	var userAction sqldb.UserAction
 	err := workflow.ExecuteActivity(ctx, "CreateUserAction", input).Get(ctx, &userAction)
+	return userAction, err
+}
+
+func createDurableUserAction(ctx workflow.Context, input sqldb.CreateDurableUserActionInput) (sqldb.UserAction, error) {
+	var userAction sqldb.UserAction
+	err := workflow.ExecuteActivity(ctx, "CreateDurableUserAction", input).Get(ctx, &userAction)
 	return userAction, err
 }
 

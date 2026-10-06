@@ -38,6 +38,9 @@ Apply to the job posting at: {{.JobPostingUrl}}
    <index>{{.Index}}</index>
    <description>{{xmlEscape .Description}}</description>
    <role>{{xmlEscape .Role}}</role>
+   {{if .Name}}<accessible_name>{{xmlEscape .Name}}</accessible_name>{{end}}
+   {{if .Label}}<label>{{xmlEscape .Label}}</label>{{end}}
+   {{if .Submit}}<final_submit_target>true</final_submit_target>{{end}}
    {{if .Value}}<value>{{xmlEscape (derefString .Value)}}</value>{{end}}
    {{if .Required}}<is_required>{{derefBool .Required}}</is_required>{{end}}
    {{if .Checked}}<checked_state>{{xmlEscape (derefString .Checked)}}</checked_state>{{end}}

@@ -4,6 +4,9 @@ start-temporal-server:
 start-worker:
 	CompileDaemon -graceful-kill=true -command="./iris-worker -rod=show,trace,slow=1s" -build="go build -o iris-worker main.go" -exclude-dir="vendor"
 
+run-worker:
+	go run main.go
+
 # Headed worker with fixed CDP port for Chrome DevTools MCP observation.
 # MCP should use: npx chrome-devtools-mcp@latest --browserUrl http://127.0.0.1:9222
 start-worker-observe:
@@ -31,4 +34,4 @@ docker-run-host:
 		-e REDIS_HOST=127.0.0.1:6379 \
 		iris-worker:local
 
-.PHONY: start-temporal-server start-worker start-worker-observe clean docker-build docker-run docker-run-host
+.PHONY: start-temporal-server start-worker run-worker start-worker-observe clean docker-build docker-run docker-run-host

@@ -13,6 +13,8 @@ The <tagged_nodes> array provides details about each tagged element:
 - value: The value of the element
 - required: Whether the element is required
 - checked: Whether the element is checked. For checkboxes/radios/switches this is the ONLY completion indicator — their value is always empty even when satisfied. checked="true" means the field is already done; clicking it again toggles it OFF and undoes it.
+- accessible_name and label: Semantic identity used to identify elements across fresh screenshots. Choose actions by the current index, but do not assume an index remains stable after the page changes.
+- final_submit_target: This marks a final application submit control. Use submit_application, never click, for that element.
 
 The <file_input_elements> array provides details about each file input element on the page. These elements are tagged separately from the interactive elements because they are often hidden from the visible UI because of their inability to be styled.
 - index: The tag number visible on the screenshot

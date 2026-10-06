@@ -39,6 +39,109 @@ func TestApplicationQueueConcurrentAccess(t *testing.T) {
 	}
 }
 
+func TestAcceptApplicationDeduplicatesUserActionResume(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.ExecuteWorkflow(func(ctx workflow.Context) error {
+		queue := NewApplicationQueue(ctx, nil)
+		queued := map[string]struct{}{}
+		processed := map[uint]struct{}{}
+		first := types.ApplicationQueueItem{
+			IdJobApplication:      17,
+			ApplicationWorkflowId: "resume-1",
+			ResumeUserActionID:    23,
+		}
+		acceptApplication(queue, queued, processed, map[uint]types.ApplicationQueueItem{}, map[uint]types.ApplicationQueueItem{}, first)
+		first.ApplicationWorkflowId = "resume-duplicate"
+		acceptApplication(queue, queued, processed, map[uint]types.ApplicationQueueItem{}, map[uint]types.ApplicationQueueItem{}, first)
+
+		items := queue.Snapshot()
+		if len(items) != 1 || items[0].ApplicationWorkflowId != "resume-1" {
+			return fmt.Errorf("queued resume = %+v, want one original resume", items)
+		}
+		if _, ok := processed[23]; !ok {
+			return fmt.Errorf("resume user action ID was not recorded")
+		}
+		return nil
+	})
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAcceptApplicationDefersResumeUntilCurrentWorkflowSettles(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.ExecuteWorkflow(func(ctx workflow.Context) error {
+		queue := NewApplicationQueue(ctx, nil)
+		queued := map[string]struct{}{"17": {}}
+		processed := map[uint]struct{}{}
+		active := map[uint]types.ApplicationQueueItem{
+			17: {IdJobApplication: 17, IdUser: 10, ApplicationWorkflowId: "paused"},
+		}
+		activeUsers := map[uint]struct{}{10: {}}
+		deferred := map[uint]types.ApplicationQueueItem{}
+		resume := types.ApplicationQueueItem{
+			IdJobApplication:      17,
+			IdUser:                10,
+			ApplicationWorkflowId: "resume-1",
+			ResumeUserActionID:    23,
+		}
+
+		acceptApplication(queue, queued, processed, active, deferred, resume)
+		if !queue.IsEmpty() || deferred[17].ApplicationWorkflowId != "resume-1" {
+			return fmt.Errorf("resume was not deferred while application remained active")
+		}
+		sem := workflow.NewSemaphore(ctx, 1)
+		if !sem.TryAcquire(ctx, 1) {
+			return fmt.Errorf("failed to acquire active application slot")
+		}
+		settleApplication(queue, sem, queued, active, activeUsers, deferred, 17)
+		if items := queue.Snapshot(); len(items) != 1 || items[0].ApplicationWorkflowId != "resume-1" {
+			return fmt.Errorf("settled application did not enqueue the durable resume: %+v", items)
+		}
+		acceptApplication(queue, queued, processed, active, deferred, resume)
+		if items := queue.Snapshot(); len(items) != 1 {
+			return fmt.Errorf("duplicate resume was enqueued: %+v", items)
+		}
+		return nil
+	})
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDequeueEligibleApplicationSerializesPerUser(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.ExecuteWorkflow(func(ctx workflow.Context) error {
+		queue := NewApplicationQueue(ctx, []types.ApplicationQueueItem{
+			{IdJobApplication: 1, IdUser: 10},
+			{IdJobApplication: 2, IdUser: 20},
+			{IdJobApplication: 3, IdUser: 10},
+		})
+		activeUsers := map[uint]struct{}{10: {}}
+
+		item, ok := dequeueEligibleApplication(queue, activeUsers)
+		if !ok || item.IdJobApplication != 2 {
+			return fmt.Errorf("eligible item = %+v, %v; want application 2 for user 20", item, ok)
+		}
+		if _, ok := dequeueEligibleApplication(queue, activeUsers); ok {
+			return fmt.Errorf("dequeued an application while all remaining users are active")
+		}
+
+		delete(activeUsers, 10)
+		item, ok = dequeueEligibleApplication(queue, activeUsers)
+		if !ok || item.IdJobApplication != 1 {
+			return fmt.Errorf("next eligible item = %+v, %v; want FIFO application 1 for user 10", item, ok)
+		}
+		return nil
+	})
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func testQueueFIFO(ctx workflow.Context) error {
 	queue := NewApplicationQueue(ctx, []types.ApplicationQueueItem{
 		{IdJobApplication: 1},

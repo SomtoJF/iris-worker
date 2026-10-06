@@ -9,9 +9,9 @@ import (
 	"github.com/SomtoJF/iris-worker/activity/browser"
 	"github.com/SomtoJF/iris-worker/activity/realtimeevent"
 	"github.com/SomtoJF/iris-worker/activity/sqldb"
-	"github.com/SomtoJF/iris-worker/browserfactory"
 	browserpooltypes "github.com/SomtoJF/iris-worker/workflow/browserpool/types"
 	jobapplicationprofile "github.com/SomtoJF/iris-worker/workflow/jobapplication/profile"
+	"github.com/google/uuid"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
@@ -19,6 +19,8 @@ import (
 type JobApplicationWorkflowInput struct {
 	IdJobApplication      uint   `json:"id_job_application"`
 	BrowserPoolWorkflowID string `json:"browser_pool_workflow_id,omitempty"`
+	NewReplayGeneration   bool   `json:"new_replay_generation,omitempty"`
+	ResumeUserActionID    uint   `json:"resume_user_action_id,omitempty"`
 }
 
 type jobApplicationRuntimeInput struct {
@@ -28,6 +30,8 @@ type jobApplicationRuntimeInput struct {
 	IdUser                uint
 	IdResume              uint
 	BrowserPoolWorkflowID string
+	ResumeUserActionID    uint
+	DurableResumeVersion  bool
 }
 
 type JobDetails struct {
@@ -138,6 +142,19 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		JobDescription:    application.JobDescription,
 		IsValidJobPosting: true,
 	}
+	applicationBrowserID := workflow.GetInfo(ctx).WorkflowExecution.ID
+	if workflow.GetVersion(ctx, "persisted-application-browser-id", workflow.DefaultVersion, 1) == 1 {
+		resolvedBrowserID, resolveErr := resolveApplicationBrowserID(ctx, application)
+		if resolveErr != nil {
+			logger.Error("Failed to resolve application browser ID", "error", resolveErr)
+			return resolveErr
+		}
+		applicationBrowserID = resolvedBrowserID
+	}
+	if err := beginBrowserReplayGeneration(ctx, input.NewReplayGeneration, applicationBrowserID); err != nil {
+		logger.Error("Failed to start browser replay generation", "error", err)
+		return err
+	}
 	runtimeInput := jobApplicationRuntimeInput{
 		IdJobApplication:      application.IdJobApplication,
 		ApplicationExternalId: application.IdExternal.String(),
@@ -145,8 +162,15 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		IdUser:                application.UserId,
 		IdResume:              application.ResumeId,
 		BrowserPoolWorkflowID: input.BrowserPoolWorkflowID,
+		ResumeUserActionID:    input.ResumeUserActionID,
 	}
+	durableResumeVersion := workflow.GetVersion(ctx, "durable-user-action-resume", workflow.DefaultVersion, 1)
+	runtimeInput.DurableResumeVersion = durableResumeVersion == 1
 	defer notifyBrowserPoolApplicationSettled(ctx, runtimeInput)
+
+	if workflow.GetVersion(ctx, "mark-application-processing", workflow.DefaultVersion, 1) == 1 {
+		markApplicationProcessing(ctx, runtimeInput, jobDetails)
+	}
 
 	// Set up cancellation signal listener
 	cancelCtx, cancelFunc := workflow.WithCancel(ctx)
@@ -167,8 +191,6 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		cancelFunc()
 	})
 
-	workflowId := workflow.GetInfo(ctx).WorkflowExecution.ID
-
 	var execResult executeJobApplicationResult
 
 	sessionCtx, err := workflow.CreateSession(cancelCtx, &workflow.SessionOptions{
@@ -185,7 +207,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	}
 	defer workflow.CompleteSession(sessionCtx)
 
-	err = executeJobApplication(ctx, cancelCtx, sessionCtx, workflowId, runtimeInput, &jobDetails, &execResult)
+	err = executeJobApplication(ctx, cancelCtx, sessionCtx, applicationBrowserID, runtimeInput, &jobDetails, &execResult)
 	if err != nil {
 		if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, runtimeInput, jobDetails, cancelPayload); handled {
 			return cerr
@@ -218,6 +240,10 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		return err
 	}
 
+	if execResult.UserActionPaused {
+		return nil
+	}
+
 	handleApplicationSuccess(ctx, runtimeInput, jobDetails)
 
 	questions := mapToQuestions(execResult.QAMap)
@@ -243,6 +269,58 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	return nil
 }
 
+type applicationBrowserIDResult struct {
+	Found bool   `json:"Found"`
+	ID    string `json:"ID"`
+}
+
+func resolveApplicationBrowserID(ctx workflow.Context, application sqldb.JobApplication) (string, error) {
+	var persisted applicationBrowserIDResult
+	if err := workflow.ExecuteActivity(ctx, "GetApplicationBrowserID", application.IdJobApplication).Get(ctx, &persisted); err != nil {
+		return "", fmt.Errorf("get persisted application browser ID: %w", err)
+	}
+	if persisted.Found {
+		browserID, err := uuid.Parse(persisted.ID)
+		if err != nil {
+			return "", fmt.Errorf("parse persisted application browser ID: %w", err)
+		}
+		return browserID.String(), nil
+	}
+
+	var proposedID string
+	if err := workflow.SideEffect(ctx, func(workflow.Context) interface{} {
+		return uuid.NewString()
+	}).Get(&proposedID); err != nil {
+		return "", fmt.Errorf("generate application browser ID: %w", err)
+	}
+	if _, err := uuid.Parse(proposedID); err != nil {
+		return "", fmt.Errorf("generate application browser ID: %w", err)
+	}
+
+	var browserID string
+	if err := workflow.ExecuteActivity(ctx, "CreateApplicationBrowserID", sqldb.CreateApplicationBrowserIDInput{
+		IdJobApplication: application.IdJobApplication,
+		ID:               proposedID,
+	}).Get(ctx, &browserID); err != nil {
+		return "", fmt.Errorf("persist application browser ID: %w", err)
+	}
+	parsedID, err := uuid.Parse(browserID)
+	if err != nil {
+		return "", fmt.Errorf("parse persisted application browser ID: %w", err)
+	}
+	return parsedID.String(), nil
+}
+
+func beginBrowserReplayGeneration(ctx workflow.Context, startNewGeneration bool, applicationBrowserID string) error {
+	if workflow.GetVersion(ctx, "explicit-browser-replay-generation", workflow.DefaultVersion, 1) != 1 || !startNewGeneration {
+		return nil
+	}
+	return workflow.ExecuteActivity(ctx, "BeginBrowserReplayGeneration", sqldb.BeginBrowserReplayGenerationInput{
+		ApplicationBrowserID: applicationBrowserID,
+		WorkflowID:           workflow.GetInfo(ctx).WorkflowExecution.ID,
+	}).Get(ctx, nil)
+}
+
 func notifyBrowserPoolApplicationSettled(ctx workflow.Context, input jobApplicationRuntimeInput) {
 	if input.BrowserPoolWorkflowID == "" {
 		return
@@ -261,8 +339,9 @@ func notifyBrowserPoolApplicationSettled(ctx workflow.Context, input jobApplicat
 }
 
 type executeJobApplicationResult struct {
-	CoverLetter *string
-	QAMap       map[string]string
+	CoverLetter      *string
+	QAMap            map[string]string
+	UserActionPaused bool
 }
 
 func executeJobApplication(
@@ -289,23 +368,28 @@ func executeJobApplication(
 		return newJobAppError(err, "Failed to download and load resume into memory", "An error occurred while loading your resume into memory")
 	}
 
-	if err := openWebpage(sessionCtx, workflowID, input.Url); err != nil {
-		return newJobAppError(err, "Failed to open webpage", "We couldn't open the job posting page")
-	}
-
-	// Ensure browser resources are released even if the session is canceled/times out.
-	// Use a disconnected context derived from the base workflow context, not the session context.
+	// Ensure browser resources are released even if startup fails or the session is canceled.
 	defer func() {
-		newCtx, _ := workflow.NewDisconnectedContext(ctx)
-		closeOpts := workflow.ActivityOptions{
-			StartToCloseTimeout: 30 * time.Second,
-			RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
+		if err := closeApplicationBrowser(ctx, workflowID); err != nil {
+			workflow.GetLogger(ctx).Error("Failed to close application browser", "error", err)
 		}
-		newCtx = workflow.WithActivityOptions(newCtx, closeOpts)
-		workflow.ExecuteActivity(newCtx, "ClosePage", browser.ClosePageInput{
-			WorkflowID: workflowID,
-		}).Get(newCtx, nil)
 	}()
+	replayVersion := workflow.GetVersion(ctx, "browser-mutation-replay-catchup", workflow.DefaultVersion, 1)
+	replayRequired := false
+	var openErr error
+	if replayVersion == 1 {
+		replayRequired, openErr = openWebpageWithReplayStatus(sessionCtx, workflowID, input.Url)
+	} else {
+		openErr = openWebpage(sessionCtx, workflowID, input.Url)
+	}
+	if openErr != nil {
+		return newJobAppError(openErr, "Failed to open webpage", "We couldn't open the job posting page")
+	}
+	if replayVersion == 1 && replayRequired {
+		if err := replayBrowserMutations(sessionCtx, workflowID, input.IdUser, input.IdJobApplication, input.Url); err != nil {
+			return newJobAppError(err, "Failed to replay browser mutations", "We couldn't safely restore the application page")
+		}
+	}
 
 	userProfileBytes, err := json.Marshal(userProfile)
 	if err != nil {
@@ -316,6 +400,14 @@ func executeJobApplication(
 	isApplicationComplete := false
 	toolCallHistory := []ToolCallResult{}
 	qaMap := make(map[string]string)
+	var userActionResult sqldb.SubmittedUserAction
+	if input.ResumeUserActionID != 0 && input.DurableResumeVersion {
+		if err := workflow.ExecuteActivity(ctx, "GetSubmittedUserAction", sqldb.SubmittedUserActionInput{
+			IdUserAction: input.ResumeUserActionID,
+		}).Get(ctx, &userActionResult); err != nil {
+			return newJobAppError(err, "Failed to load submitted user action", "We couldn't resume the application with your answers")
+		}
+	}
 	const maxAgentIterations = 50
 
 	for iteration := 0; !isApplicationComplete && iteration < maxAgentIterations; iteration++ {
@@ -348,19 +440,21 @@ func executeJobApplication(
 		requiredFields := extractRequiredFields(screenshot.TaggedNodes)
 
 		plannerRequest := PlannerRequest{
-			IdUser:                  input.IdUser,
-			IdJobApplication:        input.IdJobApplication,
-			JobPostingUrl:           input.Url,
-			ScreenshotPath:          screenshot.Path,
-			TaggedNodes:             screenshot.TaggedNodes,
-			TaggedFileInputElements: screenshot.TaggedFileInputNodes,
-			ToolCallHistory:         toolCallHistory,
-			UserResume:              userResume.Content,
-			JobDescription:          jobDetails.JobDescription,
-			UserResumePath:          resumePath,
-			UserProfileJSON:         userProfileJSON,
-			RequiredFields:          requiredFields,
-			CurrentDate:             workflow.Now(cancelCtx).Format("2006-01-02"),
+			IdUser:                     input.IdUser,
+			IdJobApplication:           input.IdJobApplication,
+			JobPostingUrl:              input.Url,
+			ScreenshotPath:             screenshot.Path,
+			TaggedNodes:                screenshot.TaggedNodes,
+			TaggedFileInputElements:    screenshot.TaggedFileInputNodes,
+			ToolCallHistory:            toolCallHistory,
+			UserResume:                 userResume.Content,
+			JobDescription:             jobDetails.JobDescription,
+			UserResumePath:             resumePath,
+			UserProfileJSON:            userProfileJSON,
+			RequiredFields:             requiredFields,
+			CurrentDate:                workflow.Now(cancelCtx).Format("2006-01-02"),
+			UserActionID:               userActionResult.IdExternal.String(),
+			UserActionResultCiphertext: userActionResult.Ciphertext,
 		}
 
 		plannerResponse, err := planNextAction(cancelCtx, plannerRequest)
@@ -391,8 +485,22 @@ func executeJobApplication(
 		}
 
 		if plannerResponse.ToolCall != nil {
-			toolResult := executeToolCall(sessionCtx, workflowID, input.IdUser, input.IdJobApplication, *plannerResponse.ToolCall)
+			toolResult := executeToolCall(
+				sessionCtx,
+				workflowID,
+				input.IdUser,
+				input.IdJobApplication,
+				*plannerResponse.ToolCall,
+				screenshot.TaggedNodes,
+				screenshot.TaggedFileInputNodes,
+				userActionResult.IdExternal.String(),
+				userActionResult.Ciphertext,
+			)
 			toolCallHistory = append(toolCallHistory, toolResult)
+			if paused, ok := toolResult.Result["user_action_paused"].(bool); ok && paused {
+				result.UserActionPaused = true
+				return nil
+			}
 
 			if toolResult.Error != nil && isCancelled(cancelCtx) {
 				return toolResult.Error
@@ -416,8 +524,8 @@ func executeJobApplication(
 	return nil
 }
 
-func extractRequiredFields(taggedNodes []browserfactory.SerializableTaggedNode) []browserfactory.SerializableTaggedNode {
-	required := make([]browserfactory.SerializableTaggedNode, 0)
+func extractRequiredFields(taggedNodes []browser.SerializableTaggedNode) []browser.SerializableTaggedNode {
+	required := make([]browser.SerializableTaggedNode, 0)
 	for _, node := range taggedNodes {
 		if node.Required == nil || !*node.Required {
 			continue
@@ -450,13 +558,35 @@ func handleApplicationCancelled(ctx workflow.Context, input jobApplicationRuntim
 		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
 	}
 	newCtx = workflow.WithActivityOptions(newCtx, cleanupOpts)
+	if workflow.GetVersion(ctx, "persist-application-cancellation", workflow.DefaultVersion, 1) == 1 {
+		data := map[string]interface{}{"status": sqldb.JobApplicationStatusCancelled}
+		if reason != "" {
+			data["cancellation_reason"] = reason
+		}
+		if err := updateJobApplication(newCtx, input.IdJobApplication, data); err != nil {
+			workflow.GetLogger(ctx).Error("Failed to persist application cancellation", "error", err)
+		}
+	}
 
-	workflow.ExecuteActivity(newCtx, "PublishRedisEvent", input.IdUser, string(realtimeevent.EventApplicationCancelled), map[string]interface{}{
+	if err := workflow.ExecuteActivity(newCtx, "PublishRedisEvent", input.IdUser, string(realtimeevent.EventApplicationCancelled), map[string]interface{}{
 		"id":          input.ApplicationExternalId,
 		"jobTitle":    jobDetails.JobTitle,
 		"companyName": jobDetails.CompanyName,
 		"reason":      reason,
-	}).Get(newCtx, nil)
+	}).Get(newCtx, nil); err != nil {
+		workflow.GetLogger(ctx).Error("Failed to publish application cancellation", "error", err)
+	}
+}
+
+func closeApplicationBrowser(ctx workflow.Context, workflowID string) error {
+	cleanupCtx, _ := workflow.NewDisconnectedContext(ctx)
+	cleanupCtx = workflow.WithActivityOptions(cleanupCtx, workflow.ActivityOptions{
+		StartToCloseTimeout: 30 * time.Second,
+		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
+	})
+	return workflow.ExecuteActivity(cleanupCtx, "ClosePage", browser.ClosePageInput{
+		WorkflowID: workflowID,
+	}).Get(cleanupCtx, nil)
 }
 
 func handleApplicationError(ctx workflow.Context, input jobApplicationRuntimeInput, jobDetails JobDetails, failureReason string) {
@@ -501,6 +631,23 @@ func handleApplicationHalted(ctx workflow.Context, input jobApplicationRuntimeIn
 	}).Get(newCtx, nil)
 }
 
+func markApplicationProcessing(ctx workflow.Context, input jobApplicationRuntimeInput, jobDetails JobDetails) {
+	logger := workflow.GetLogger(ctx)
+	if err := updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusProcessing, nil); err != nil {
+		logger.Error("Failed to set application status to processing", "error", err)
+		return
+	}
+	if err := workflow.ExecuteActivity(ctx, "PublishRedisEvent", input.IdUser, string(realtimeevent.EventApplicationDetailsUpdated), map[string]interface{}{
+		"id":          input.ApplicationExternalId,
+		"jobTitle":    jobDetails.JobTitle,
+		"companyName": jobDetails.CompanyName,
+		"status":      string(sqldb.JobApplicationStatusProcessing),
+		"updatedAt":   workflow.Now(ctx).UTC().Format(time.RFC3339),
+	}).Get(ctx, nil); err != nil {
+		logger.Error("Failed to publish processing status", "error", err)
+	}
+}
+
 func handleApplicationSuccess(ctx workflow.Context, input jobApplicationRuntimeInput, jobDetails JobDetails) {
 	updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusApplied, nil)
 	workflow.ExecuteActivity(ctx, "PublishRedisEvent", input.IdUser, string(realtimeevent.EventApplicationSuccessful), map[string]interface{}{
@@ -515,6 +662,15 @@ func openWebpage(ctx workflow.Context, workflowID string, url string) error {
 		Url:        url,
 		WorkflowID: workflowID,
 	}).Get(ctx, nil)
+}
+
+func openWebpageWithReplayStatus(ctx workflow.Context, workflowID string, url string) (bool, error) {
+	var result browser.OpenWebpageOutput
+	err := workflow.ExecuteActivity(ctx, "OpenWebpage", browser.OpenWebpageInput{
+		Url:        url,
+		WorkflowID: workflowID,
+	}).Get(ctx, &result)
+	return result.ReplayRequired, err
 }
 
 func updateJobApplicationStatus(ctx workflow.Context, idJobApplication uint, status sqldb.JobApplicationStatus, reason *string) error {

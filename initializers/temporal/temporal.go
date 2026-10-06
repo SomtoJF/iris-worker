@@ -1,7 +1,7 @@
 package temporal
 
 import (
-	stdlog "log"
+	"fmt"
 	"os"
 
 	"go.temporal.io/sdk/client"
@@ -11,7 +11,7 @@ import (
 func ConnectToTemporal(logger temporallog.Logger) (client.Client, error) {
 	temporalHost := os.Getenv("TEMPORAL_HOST")
 	if temporalHost == "" {
-		temporalHost = "localhost:7233"
+		temporalHost = "127.0.0.1:7233"
 	}
 
 	nameSpace := os.Getenv("TEMPORAL_NAMESPACE")
@@ -28,7 +28,7 @@ func ConnectToTemporal(logger temporallog.Logger) (client.Client, error) {
 	c, err := client.Dial(clientOptions)
 
 	if err != nil {
-		stdlog.Fatalln("Unable to create Temporal client:", err)
+		return nil, fmt.Errorf("unable to create Temporal client: %w", err)
 	}
 
 	return c, nil

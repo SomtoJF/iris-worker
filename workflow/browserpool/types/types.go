@@ -14,6 +14,8 @@ type ApplicationQueueItem struct {
 	IdUser                uint   `json:"id_user"`
 	IdResume              uint   `json:"id_resume"`
 	ApplicationWorkflowId string `json:"application_workflow_id"`
+	NewReplayGeneration   bool   `json:"new_replay_generation,omitempty"`
+	ResumeUserActionID    uint   `json:"resume_user_action_id,omitempty"`
 }
 
 type BrowserPoolApplicationSettledPayload struct {

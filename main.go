@@ -11,7 +11,7 @@ import (
 	"github.com/SomtoJF/iris-worker/activity/llm"
 	"github.com/SomtoJF/iris-worker/activity/realtimeevent"
 	s3Activities "github.com/SomtoJF/iris-worker/activity/s3"
-	sqldbActivities "github.com/SomtoJF/iris-worker/activity/sqldb"
+	sqldbActivity "github.com/SomtoJF/iris-worker/activity/sqldb"
 	"github.com/SomtoJF/iris-worker/activity/web"
 	"github.com/SomtoJF/iris-worker/common"
 	"github.com/SomtoJF/iris-worker/initializers/env"
@@ -91,13 +91,16 @@ func registerJobApplicationActivities(w worker.Worker, dependencies common.Depen
 	aipiClient := dependencies.GetAIPIClient()
 	browserClient := dependencies.GetBrowserClient()
 
-	sqldbActivities := sqldbActivities.NewActivities(db)
+	sqldbActivities := sqldbActivity.NewActivitiesWithBrowserProvider(
+		db,
+		sqldbActivity.BrowserProvider(browserClient.GetBrowserProvider()),
+	)
 	w.RegisterActivity(sqldbActivities)
 
 	llmActivities := llm.NewActivity(aipiClient)
 	w.RegisterActivity(llmActivities)
 
-	browserActivities := browser.NewActivities(browserClient)
+	browserActivities := browser.NewActivities(browserClient, sqldbActivity.NewBrowserStore(db))
 	w.RegisterActivity(browserActivities)
 
 	webActivities := web.NewActivity(db)

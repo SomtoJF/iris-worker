@@ -89,7 +89,7 @@ iris-worker is a Temporal worker that executes job application workflows. The ar
 
 ### Data Models
 
-**JobApplication** (activity/sqldb/activity.go):
+**JobApplication** (`iris-api/model/job_application.go`, aliased in `activity/sqldb/jobapplication.go`):
 
 - Status: `processing`, `applied`, `failed`
 - Tracked by `id_job_application` (uint primary key)
@@ -113,6 +113,10 @@ Required:
 ## Complex Tasks
 
 Split complex tasks into smaller subtasks. Delegate subtasks to subagents running on Claude Opus 4.8 (`model: opus`). Main agent (Fable 5) acts as orchestrator only — coordinates, reviews results, doesn't do subtask work itself.
+
+## Database Model Ownership
+
+`iris-api/model` is the source of truth for database models shared with this worker. Define each model in its own API model file; do not duplicate shared model structs in worker database code. When worker code needs a shared model locally, declare a type alias to the vendored API model and keep worker-specific queries, stores, and activity logic in the worker.
 
 ## Vendoring Rule
 
