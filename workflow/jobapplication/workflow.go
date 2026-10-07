@@ -437,6 +437,133 @@ func executeJobApplication(
 			}
 		}
 
+		// Use JEV to classify form fields deterministically (resume, structured, open-ended, ignore).
+		// This is a cheap call (~$0.001) that reduces LLM calls from 10 to 1 per application.
+		logger := workflow.GetLogger(sessionCtx)
+		classified, classifyErr := classifyFieldsWithJev(
+			sessionCtx,
+			workflowID,
+			input.IdUser,
+			input.IdJobApplication,
+			screenshot.TaggedNodes,
+			userProfile,
+		)
+
+		if classifyErr != nil {
+			logger.Warn("JEV field classification failed, falling back to LLM-only mode", "error", classifyErr)
+			classified = nil // Fall back to normal LLM flow
+		}
+
+		// If classification succeeded, fill deterministic fields (resume + structured) without LLM.
+		// Then re-screenshot and filter requiredFields to exclude what we already filled.
+		if classified != nil {
+			fillResult, fillErr := fillDeterministicFields(
+				sessionCtx,
+				workflowID,
+				input.IdUser,
+				input.IdJobApplication,
+				classified,
+				userProfile,
+				resumePath,
+			)
+
+			if fillErr != nil {
+				logger.Warn("Deterministic fill encountered an error, continuing with LLM", "error", fillErr)
+			}
+
+			if fillResult != nil && (fillResult.ResumeFieldsFilled > 0 || fillResult.StructuredFieldsFilled > 0) {
+				logger.Info("Deterministic fields filled",
+					"resume_filled", fillResult.ResumeFieldsFilled,
+					"structured_filled", fillResult.StructuredFieldsFilled,
+					"failed_structured", len(fillResult.FailedStructured),
+				)
+
+				// Re-screenshot after deterministic fills so planner sees current state
+				err = workflow.ExecuteActivity(sessionCtx, "TakeScreenshot", browser.TakeScreenshotInput{
+					WorkflowID: workflowID,
+					FileName:   fmt.Sprintf("screenshot_%d_postdeterministic.png", iteration),
+				}).Get(sessionCtx, &screenshot)
+				if err != nil {
+					return newJobAppError(err, "Failed to take screenshot after deterministic fill", "We couldn't continue the application because we failed to capture the page state")
+				}
+
+				// Filter requiredFields to only include open-ended fields that still need LLM reasoning.
+				// This reduces planner load and cost.
+				openEndedFields := filterClassifiedFieldsForPlanner(classified)
+				requiredFields := extractRequiredFieldsFromClassified(openEndedFields, screenshot.TaggedNodes)
+				logger.Info("Filtered required fields after deterministic fill", "count", len(requiredFields))
+
+				plannerRequest := PlannerRequest{
+					IdUser:                     input.IdUser,
+					IdJobApplication:           input.IdJobApplication,
+					JobPostingUrl:              input.Url,
+					ScreenshotPath:             screenshot.Path,
+					TaggedNodes:                screenshot.TaggedNodes,
+					TaggedFileInputElements:    screenshot.TaggedFileInputNodes,
+					ToolCallHistory:            toolCallHistory,
+					UserResume:                 userResume.Content,
+					JobDescription:             jobDetails.JobDescription,
+					UserResumePath:             resumePath,
+					UserProfileJSON:            userProfileJSON,
+					RequiredFields:             requiredFields,
+					CurrentDate:                workflow.Now(cancelCtx).Format("2006-01-02"),
+					UserActionID:               userActionResult.IdExternal.String(),
+					UserActionResultCiphertext: userActionResult.Ciphertext,
+				}
+
+				plannerResponse, err := planNextAction(cancelCtx, plannerRequest)
+				if err != nil {
+					return newJobAppError(err, "Failed to plan next action", "We couldn't continue the application because we failed to plan the next step")
+				}
+
+				if plannerResponse.IsApplicationFailed {
+					failureReason := "We couldn't complete your application. Please try again."
+					if plannerResponse.FailureReason != nil && *plannerResponse.FailureReason != "" {
+						failureReason = *plannerResponse.FailureReason
+					}
+					if plannerResponse.FailureStatus != nil && *plannerResponse.FailureStatus == PlannerFailureStatusTruthfulness {
+						return newHaltedJobAppError(fmt.Errorf("%s", failureReason), "Job application halted by truthfulness clause", failureReason)
+					}
+					return newJobAppError(fmt.Errorf("%s", failureReason), "Job application failed by planner", failureReason)
+				}
+
+				for _, qa := range plannerResponse.QuestionsAnswered {
+					if qa.Question != "" && qa.Answer != "" {
+						qaMap[qa.Question] = qa.Answer
+					}
+				}
+
+				isApplicationComplete = plannerResponse.IsApplicationComplete
+				if isApplicationComplete {
+					break
+				}
+
+				if plannerResponse.ToolCall != nil {
+					toolResult := executeToolCall(
+						sessionCtx,
+						workflowID,
+						input.IdUser,
+						input.IdJobApplication,
+						*plannerResponse.ToolCall,
+						screenshot.TaggedNodes,
+						screenshot.TaggedFileInputNodes,
+						userActionResult.IdExternal.String(),
+						userActionResult.Ciphertext,
+					)
+					toolCallHistory = append(toolCallHistory, toolResult)
+					if paused, ok := toolResult.Result["user_action_paused"].(bool); ok && paused {
+						result.UserActionPaused = true
+						return nil
+					}
+					if _, ok := toolResult.Result["error"]; ok {
+						isApplicationComplete = true
+					}
+				}
+				continue // Skip the fallback LLM-only flow below
+			}
+		}
+
+		// Fallback: original LLM-only flow if JEV classification didn't succeed or didn't fill anything
 		requiredFields := extractRequiredFields(screenshot.TaggedNodes)
 
 		plannerRequest := PlannerRequest{
