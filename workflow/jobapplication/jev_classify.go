@@ -16,10 +16,10 @@ import (
 type FieldClassificationType string
 
 const (
-	FieldTypeResume      FieldClassificationType = "resume_file"
-	FieldTypeStructured  FieldClassificationType = "structured"
-	FieldTypeOpenEnded   FieldClassificationType = "open_ended"
-	FieldTypeIgnore      FieldClassificationType = "ignore"
+	FieldTypeResume     FieldClassificationType = "resume_file"
+	FieldTypeStructured FieldClassificationType = "structured"
+	FieldTypeOpenEnded  FieldClassificationType = "open_ended"
+	FieldTypeIgnore     FieldClassificationType = "ignore"
 )
 
 // ClassifiedField represents a form field and how it should be filled
@@ -75,10 +75,10 @@ func classifyFieldsWithJev(
 				node.Index, node.Label, node.Description,
 			),
 			Criteria: map[string]string{
-				"resume_file":  "File upload field specifically for resume/CV PDF",
-				"structured":   "Structured field like email, phone, country, name, or LinkedIn URL",
-				"open_ended":   "Open-ended text field like motivation, why join, cover letter, or essay",
-				"ignore":       "Hidden field, already filled, or not meant to be filled by applicant",
+				"resume_file": "File upload field specifically for resume/CV PDF",
+				"structured":  "Structured field like email, phone, country, name, or LinkedIn URL",
+				"open_ended":  "Open-ended text field like motivation, why join, cover letter, or essay",
+				"ignore":      "Hidden field, already filled, or not meant to be filled by applicant",
 			},
 		}
 	}
@@ -109,8 +109,8 @@ func classifyFieldsWithJev(
 		State: map[string]string{
 			"form_state": stateText,
 		},
-		Questions:       questions,
-		IdUser:          userID,
+		Questions:        questions,
+		IdUser:           userID,
 		IdJobApplication: &applicationID,
 	}).Get(ctx, &result); err != nil {
 		return nil, fmt.Errorf("JEV field classification: %w", err)

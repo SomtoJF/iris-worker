@@ -10,10 +10,10 @@ import (
 
 // DeterministicFillResult contains metrics about what was filled
 type DeterministicFillResult struct {
-	ResumeFieldsFilled    int
+	ResumeFieldsFilled     int
 	StructuredFieldsFilled int
-	FailedResumeFill   bool
-	FailedStructured   []string // List of structured field labels that failed
+	FailedResumeFill       bool
+	FailedStructured       []string // List of structured field labels that failed
 }
 
 // fillDeterministicFields fills resume + structured fields without calling the LLM.
@@ -104,7 +104,7 @@ func fillDeterministicFields(
 		}
 	}
 
-	logger.Info("Deterministic fill complete", 
+	logger.Info("Deterministic fill complete",
 		"resume_filled", result.ResumeFieldsFilled,
 		"structured_filled", result.StructuredFieldsFilled,
 		"failed_structured_count", len(result.FailedStructured),

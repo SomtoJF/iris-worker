@@ -1,7 +1,6 @@
 package jobapplication
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -10,7 +9,6 @@ import (
 	"github.com/SomtoJF/iris-worker/activity/realtimeevent"
 	"github.com/SomtoJF/iris-worker/activity/sqldb"
 	browserpooltypes "github.com/SomtoJF/iris-worker/workflow/browserpool/types"
-	jobapplicationprofile "github.com/SomtoJF/iris-worker/workflow/jobapplication/profile"
 	"github.com/google/uuid"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
@@ -353,19 +351,9 @@ func executeJobApplication(
 	jobDetails *JobDetails,
 	result *executeJobApplicationResult,
 ) error {
-	userResume, err := fetchUserResume(cancelCtx, input.IdResume)
+	session, err := loadApplicationInputs(cancelCtx, input)
 	if err != nil {
-		return newJobAppError(err, "Failed to fetch user resume", "An error occurred while fetching your resume")
-	}
-
-	userProfile, err := jobapplicationprofile.Fetch(cancelCtx, input.IdUser)
-	if err != nil {
-		return newJobAppError(err, "Failed to fetch user profile", "An error occurred while fetching your profile")
-	}
-
-	resumePath, err := loadResumeIntoMemory(cancelCtx, userResume.FileName, userResume.FileKey)
-	if err != nil {
-		return newJobAppError(err, "Failed to download and load resume into memory", "An error occurred while loading your resume into memory")
+		return err
 	}
 
 	// Ensure browser resources are released even if startup fails or the session is canceled.
@@ -374,280 +362,96 @@ func executeJobApplication(
 			workflow.GetLogger(ctx).Error("Failed to close application browser", "error", err)
 		}
 	}()
-	replayVersion := workflow.GetVersion(ctx, "browser-mutation-replay-catchup", workflow.DefaultVersion, 1)
-	replayRequired := false
-	var openErr error
-	if replayVersion == 1 {
-		replayRequired, openErr = openWebpageWithReplayStatus(sessionCtx, workflowID, input.Url)
-	} else {
-		openErr = openWebpage(sessionCtx, workflowID, input.Url)
+
+	if err := openApplicationPage(ctx, sessionCtx, workflowID, input); err != nil {
+		return err
 	}
-	if openErr != nil {
-		return newJobAppError(openErr, "Failed to open webpage", "We couldn't open the job posting page")
-	}
-	if replayVersion == 1 && replayRequired {
-		if err := replayBrowserMutations(sessionCtx, workflowID, input.IdUser, input.IdJobApplication, input.Url); err != nil {
-			return newJobAppError(err, "Failed to replay browser mutations", "We couldn't safely restore the application page")
-		}
+	if err := finishSessionSetup(ctx, session, input); err != nil {
+		return err
 	}
 
-	userProfileBytes, err := json.Marshal(userProfile)
-	if err != nil {
-		return newJobAppError(err, "Failed to marshal user profile", "We couldn't marshal the user profile")
+	state := &agentLoopState{
+		ctx:         ctx,
+		cancelCtx:   cancelCtx,
+		sessionCtx:  sessionCtx,
+		workflowID:  workflowID,
+		input:       input,
+		jobDetails:  jobDetails,
+		session:     session,
+		result:      result,
+		toolHistory: []ToolCallResult{},
+		qaMap:       make(map[string]string),
 	}
-	userProfileJSON := string(userProfileBytes)
 
-	isApplicationComplete := false
-	toolCallHistory := []ToolCallResult{}
-	qaMap := make(map[string]string)
-	var userActionResult sqldb.SubmittedUserAction
-	if input.ResumeUserActionID != 0 && input.DurableResumeVersion {
-		if err := workflow.ExecuteActivity(ctx, "GetSubmittedUserAction", sqldb.SubmittedUserActionInput{
-			IdUserAction: input.ResumeUserActionID,
-		}).Get(ctx, &userActionResult); err != nil {
-			return newJobAppError(err, "Failed to load submitted user action", "We couldn't resume the application with your answers")
-		}
-	}
 	const maxAgentIterations = 50
-
-	for iteration := 0; !isApplicationComplete && iteration < maxAgentIterations; iteration++ {
-		var screenshot browser.TakeScreenshotOutput
-		err = workflow.ExecuteActivity(sessionCtx, "TakeScreenshot", browser.TakeScreenshotInput{
-			WorkflowID: workflowID,
-			FileName:   fmt.Sprintf("screenshot_%d.png", iteration),
-		}).Get(sessionCtx, &screenshot)
-		if err != nil {
-			return newJobAppError(err, "Failed to take screenshot", "We couldn't continue the application because we failed to capture the page state")
+	for i := 0; !state.complete && i < maxAgentIterations; i++ {
+		if err := runAgentIteration(state, i); err != nil {
+			return err
 		}
-
-		// Deterministically detect + solve any captcha before the planner sees the page,
-		// so the planner never has to reason about captchas. Re-screenshot afterwards if
-		// a captcha was solved so tagged nodes reflect the cleared page.
-		solvedCaptcha, err := maybeSolveCaptcha(sessionCtx, workflowID, input.IdUser, input.IdJobApplication)
-		if err != nil {
-			return newJobAppError(err, "Failed to handle captcha", "We couldn't get past a security check on the page")
-		}
-		if solvedCaptcha {
-			err = workflow.ExecuteActivity(sessionCtx, "TakeScreenshot", browser.TakeScreenshotInput{
-				WorkflowID: workflowID,
-				FileName:   fmt.Sprintf("screenshot_%d_postcaptcha.png", iteration),
-			}).Get(sessionCtx, &screenshot)
-			if err != nil {
-				return newJobAppError(err, "Failed to take screenshot after captcha", "We couldn't continue the application because we failed to capture the page state")
-			}
-		}
-
-		// Use JEV to classify form fields deterministically (resume, structured, open-ended, ignore).
-		// This is a cheap call (~$0.001) that reduces LLM calls from 10 to 1 per application.
-		logger := workflow.GetLogger(sessionCtx)
-		classified, classifyErr := classifyFieldsWithJev(
-			sessionCtx,
-			workflowID,
-			input.IdUser,
-			input.IdJobApplication,
-			screenshot.TaggedNodes,
-			userProfile,
-		)
-
-		if classifyErr != nil {
-			logger.Warn("JEV field classification failed, falling back to LLM-only mode", "error", classifyErr)
-			classified = nil // Fall back to normal LLM flow
-		}
-
-		// If classification succeeded, fill deterministic fields (resume + structured) without LLM.
-		// Then re-screenshot and filter requiredFields to exclude what we already filled.
-		if classified != nil {
-			fillResult, fillErr := fillDeterministicFields(
-				sessionCtx,
-				workflowID,
-				input.IdUser,
-				input.IdJobApplication,
-				classified,
-				userProfile,
-				resumePath,
-			)
-
-			if fillErr != nil {
-				logger.Warn("Deterministic fill encountered an error, continuing with LLM", "error", fillErr)
-			}
-
-			if fillResult != nil && (fillResult.ResumeFieldsFilled > 0 || fillResult.StructuredFieldsFilled > 0) {
-				logger.Info("Deterministic fields filled",
-					"resume_filled", fillResult.ResumeFieldsFilled,
-					"structured_filled", fillResult.StructuredFieldsFilled,
-					"failed_structured", len(fillResult.FailedStructured),
-				)
-
-				// Re-screenshot after deterministic fills so planner sees current state
-				err = workflow.ExecuteActivity(sessionCtx, "TakeScreenshot", browser.TakeScreenshotInput{
-					WorkflowID: workflowID,
-					FileName:   fmt.Sprintf("screenshot_%d_postdeterministic.png", iteration),
-				}).Get(sessionCtx, &screenshot)
-				if err != nil {
-					return newJobAppError(err, "Failed to take screenshot after deterministic fill", "We couldn't continue the application because we failed to capture the page state")
-				}
-
-				// Filter requiredFields to only include open-ended fields that still need LLM reasoning.
-				// This reduces planner load and cost.
-				openEndedFields := filterClassifiedFieldsForPlanner(classified)
-				requiredFields := extractRequiredFieldsFromClassified(openEndedFields, screenshot.TaggedNodes)
-				logger.Info("Filtered required fields after deterministic fill", "count", len(requiredFields))
-
-				plannerRequest := PlannerRequest{
-					IdUser:                     input.IdUser,
-					IdJobApplication:           input.IdJobApplication,
-					JobPostingUrl:              input.Url,
-					ScreenshotPath:             screenshot.Path,
-					TaggedNodes:                screenshot.TaggedNodes,
-					TaggedFileInputElements:    screenshot.TaggedFileInputNodes,
-					ToolCallHistory:            toolCallHistory,
-					UserResume:                 userResume.Content,
-					JobDescription:             jobDetails.JobDescription,
-					UserResumePath:             resumePath,
-					UserProfileJSON:            userProfileJSON,
-					RequiredFields:             requiredFields,
-					CurrentDate:                workflow.Now(cancelCtx).Format("2006-01-02"),
-					UserActionID:               userActionResult.IdExternal.String(),
-					UserActionResultCiphertext: userActionResult.Ciphertext,
-				}
-
-				plannerResponse, err := planNextAction(cancelCtx, plannerRequest)
-				if err != nil {
-					return newJobAppError(err, "Failed to plan next action", "We couldn't continue the application because we failed to plan the next step")
-				}
-
-				if plannerResponse.IsApplicationFailed {
-					failureReason := "We couldn't complete your application. Please try again."
-					if plannerResponse.FailureReason != nil && *plannerResponse.FailureReason != "" {
-						failureReason = *plannerResponse.FailureReason
-					}
-					if plannerResponse.FailureStatus != nil && *plannerResponse.FailureStatus == PlannerFailureStatusTruthfulness {
-						return newHaltedJobAppError(fmt.Errorf("%s", failureReason), "Job application halted by truthfulness clause", failureReason)
-					}
-					return newJobAppError(fmt.Errorf("%s", failureReason), "Job application failed by planner", failureReason)
-				}
-
-				for _, qa := range plannerResponse.QuestionsAnswered {
-					if qa.Question != "" && qa.Answer != "" {
-						qaMap[qa.Question] = qa.Answer
-					}
-				}
-
-				isApplicationComplete = plannerResponse.IsApplicationComplete
-				if isApplicationComplete {
-					break
-				}
-
-				if plannerResponse.ToolCall != nil {
-					toolResult := executeToolCall(
-						sessionCtx,
-						workflowID,
-						input.IdUser,
-						input.IdJobApplication,
-						*plannerResponse.ToolCall,
-						screenshot.TaggedNodes,
-						screenshot.TaggedFileInputNodes,
-						userActionResult.IdExternal.String(),
-						userActionResult.Ciphertext,
-					)
-					toolCallHistory = append(toolCallHistory, toolResult)
-					if paused, ok := toolResult.Result["user_action_paused"].(bool); ok && paused {
-						result.UserActionPaused = true
-						return nil
-					}
-					if _, ok := toolResult.Result["error"]; ok {
-						isApplicationComplete = true
-					}
-				}
-				continue // Skip the fallback LLM-only flow below
-			}
-		}
-
-		// Fallback: original LLM-only flow if JEV classification didn't succeed or didn't fill anything
-		requiredFields := extractRequiredFields(screenshot.TaggedNodes)
-
-		plannerRequest := PlannerRequest{
-			IdUser:                     input.IdUser,
-			IdJobApplication:           input.IdJobApplication,
-			JobPostingUrl:              input.Url,
-			ScreenshotPath:             screenshot.Path,
-			TaggedNodes:                screenshot.TaggedNodes,
-			TaggedFileInputElements:    screenshot.TaggedFileInputNodes,
-			ToolCallHistory:            toolCallHistory,
-			UserResume:                 userResume.Content,
-			JobDescription:             jobDetails.JobDescription,
-			UserResumePath:             resumePath,
-			UserProfileJSON:            userProfileJSON,
-			RequiredFields:             requiredFields,
-			CurrentDate:                workflow.Now(cancelCtx).Format("2006-01-02"),
-			UserActionID:               userActionResult.IdExternal.String(),
-			UserActionResultCiphertext: userActionResult.Ciphertext,
-		}
-
-		plannerResponse, err := planNextAction(cancelCtx, plannerRequest)
-		if err != nil {
-			return newJobAppError(err, "Failed to plan next action", "We couldn't continue the application because we failed to plan the next step")
-		}
-
-		if plannerResponse.IsApplicationFailed {
-			failureReason := "We couldn't complete your application. Please try again."
-			if plannerResponse.FailureReason != nil && *plannerResponse.FailureReason != "" {
-				failureReason = *plannerResponse.FailureReason
-			}
-			if plannerResponse.FailureStatus != nil && *plannerResponse.FailureStatus == PlannerFailureStatusTruthfulness {
-				return newHaltedJobAppError(fmt.Errorf("%s", failureReason), "Job application halted by truthfulness clause", failureReason)
-			}
-			return newJobAppError(fmt.Errorf("%s", failureReason), "Job application failed by planner", failureReason)
-		}
-
-		for _, qa := range plannerResponse.QuestionsAnswered {
-			if qa.Question != "" && qa.Answer != "" {
-				qaMap[qa.Question] = qa.Answer
-			}
-		}
-
-		isApplicationComplete = plannerResponse.IsApplicationComplete
-		if isApplicationComplete {
-			break
-		}
-
-		if plannerResponse.ToolCall != nil {
-			toolResult := executeToolCall(
-				sessionCtx,
-				workflowID,
-				input.IdUser,
-				input.IdJobApplication,
-				*plannerResponse.ToolCall,
-				screenshot.TaggedNodes,
-				screenshot.TaggedFileInputNodes,
-				userActionResult.IdExternal.String(),
-				userActionResult.Ciphertext,
-			)
-			toolCallHistory = append(toolCallHistory, toolResult)
-			if paused, ok := toolResult.Result["user_action_paused"].(bool); ok && paused {
-				result.UserActionPaused = true
-				return nil
-			}
-
-			if toolResult.Error != nil && isCancelled(cancelCtx) {
-				return toolResult.Error
-			}
-
-			if plannerResponse.ToolCall.Name == "write_cover_letter" {
-				if cl, ok := toolResult.Result["cover_letter"].(string); ok {
-					result.CoverLetter = &cl
-				}
-			}
+		if state.paused {
+			return nil
 		}
 	}
 
-	if !isApplicationComplete {
+	return finalizeApplication(state)
+}
+
+// runAgentIteration: observe page, try the JEV flow (falls back to LLM flow), then plan and act.
+func runAgentIteration(s *agentLoopState, iteration int) error {
+	shot, err := captureSolvedScreenshot(s, iteration)
+	if err != nil {
+		return err
+	}
+
+	step, err := runJevFlow(s, iteration, shot)
+	if err != nil {
+		return err
+	}
+	if step == nil {
+		step = runLLMFlow(shot)
+	}
+
+	return planAndAct(s, step)
+}
+
+func takeScreenshot(ctx workflow.Context, workflowID, fileName string) (browser.TakeScreenshotOutput, error) {
+	var shot browser.TakeScreenshotOutput
+	err := workflow.ExecuteActivity(ctx, "TakeScreenshot", browser.TakeScreenshotInput{
+		WorkflowID: workflowID,
+		FileName:   fileName,
+	}).Get(ctx, &shot)
+	return shot, err
+}
+
+// captureSolvedScreenshot screenshots the page after deterministically clearing any captcha,
+// so the planner never has to reason about captchas.
+func captureSolvedScreenshot(s *agentLoopState, iteration int) (browser.TakeScreenshotOutput, error) {
+	shot, err := takeScreenshot(s.sessionCtx, s.workflowID, fmt.Sprintf("screenshot_%d.png", iteration))
+	if err != nil {
+		return shot, newJobAppError(err, "Failed to take screenshot", "We couldn't continue the application because we failed to capture the page state")
+	}
+
+	solved, err := maybeSolveCaptcha(s.sessionCtx, s.workflowID, s.input.IdUser, s.input.IdJobApplication)
+	if err != nil {
+		return shot, newJobAppError(err, "Failed to handle captcha", "We couldn't get past a security check on the page")
+	}
+	if !solved {
+		return shot, nil
+	}
+
+	shot, err = takeScreenshot(s.sessionCtx, s.workflowID, fmt.Sprintf("screenshot_%d_postcaptcha.png", iteration))
+	if err != nil {
+		return shot, newJobAppError(err, "Failed to take screenshot after captcha", "We couldn't continue the application because we failed to capture the page state")
+	}
+	return shot, nil
+}
+
+func finalizeApplication(s *agentLoopState) error {
+	if !s.complete {
 		failureReason := "We couldn't complete your application. Please try again."
 		return newJobAppError(fmt.Errorf("%s", failureReason), "Job application incomplete", failureReason)
 	}
-
-	result.QAMap = qaMap
-
+	s.result.QAMap = s.qaMap
 	return nil
 }
 
