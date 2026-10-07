@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	jevModel    = "typesafe/jev-1.13"
-	jevEndpoint = "https://openrouter.ai/api/alpha/decisions"
+	jevModel          = "typesafe/jev-1.13"
+	decisionsEndpoint = "https://openrouter.ai/api/alpha/decisions"
 )
 
 // rawSchema wraps a map to implement json.Marshaler
@@ -32,16 +32,16 @@ type OpenRouterProvider struct {
 	jevHTTPClient interface {
 		Do(*http.Request) (*http.Response, error)
 	}
-	jevEndpoint string
+	decisionsEndpoint string
 }
 
 func NewOpenRouterProvider(apiKey string) *OpenRouterProvider {
 	openrouterClient := openrouter.NewClient(apiKey)
 	return &OpenRouterProvider{
-		client:        openrouterClient,
-		apiKey:        apiKey,
-		jevHTTPClient: http.DefaultClient,
-		jevEndpoint:   jevEndpoint,
+		client:            openrouterClient,
+		apiKey:            apiKey,
+		jevHTTPClient:     http.DefaultClient,
+		decisionsEndpoint: decisionsEndpoint,
 	}
 }
 
@@ -109,7 +109,7 @@ func (p *OpenRouterProvider) GetJevCompletion(ctx context.Context, req types.Jev
 		return types.JevResponse{}, fmt.Errorf("marshal JEV Decisions request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.jevEndpoint, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.decisionsEndpoint, bytes.NewReader(body))
 	if err != nil {
 		return types.JevResponse{}, fmt.Errorf("create JEV Decisions request: %w", err)
 	}
@@ -233,6 +233,8 @@ func getModelRates(model string) modelRates {
 		"google/gemma-4-31b-it:free":                   {inputRate: 0.00, outputRate: 0.00},
 		"google/gemma-4-31b-it":                        {inputRate: 0.12, outputRate: 0.35},
 		"typesafe/jev-1.13":                            {inputRate: 0.042, outputRate: 0.00},
+		"openai/gpt-6-luna-decisions":                  {inputRate: 0.10, outputRate: 0.00},
+		"openai/gpt-5.6-luna":                          {inputRate: 0.20, outputRate: 1.20},
 	}
 
 	if rate, ok := rates[model]; ok {

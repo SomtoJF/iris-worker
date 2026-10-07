@@ -348,7 +348,7 @@ func planNextAction(ctx workflow.Context, input PlannerRequest) (PlannerResponse
 		SystemMessage:              systemPrompt,
 		UserMessage:                userPrompt,
 		ImageUrl:                   &screenshotBase64,
-		Model:                      "x-ai/grok-4.3",
+		Model:                      "openai/gpt-5.6-luna",
 		ResponseSchema:             getPlannerResponseSchema(),
 		Temperature:                &temperaturePtr,
 		IdUser:                     input.IdUser,

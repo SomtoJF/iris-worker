@@ -51,9 +51,9 @@ func TestGetJevCompletionUsesDecisionsAPI(t *testing.T) {
 	defer server.Close()
 
 	provider := &OpenRouterProvider{
-		apiKey:        "test-key",
-		jevHTTPClient: server.Client(),
-		jevEndpoint:   server.URL + "/api/alpha/decisions",
+		apiKey:            "test-key",
+		jevHTTPClient:     server.Client(),
+		decisionsEndpoint: server.URL + "/api/alpha/decisions",
 	}
 	response, err := provider.GetJevCompletion(context.Background(), types.JevRequest{
 		State: map[string]string{"page": "company overview"},
@@ -87,9 +87,9 @@ func TestGetJevCompletionReturnsAPIError(t *testing.T) {
 	defer server.Close()
 
 	provider := &OpenRouterProvider{
-		apiKey:        "test-key",
-		jevHTTPClient: server.Client(),
-		jevEndpoint:   server.URL,
+		apiKey:            "test-key",
+		jevHTTPClient:     server.Client(),
+		decisionsEndpoint: server.URL + "/api/alpha/decisions",
 	}
 	_, err := provider.GetJevCompletion(context.Background(), types.JevRequest{})
 	if err == nil {

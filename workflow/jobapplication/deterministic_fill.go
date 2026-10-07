@@ -105,8 +105,8 @@ func fillDeterministicFields(
 			continue
 		}
 
-		// wait a random number of seconds between 1 and 3 to simulate human-like delay
-		delay, err := RandomRangeSideEffect(ctx, 1, 3)
+		// wait a random number of seconds between 1 and 5 to simulate human-like delay
+		delay, err := RandomRangeSideEffect(ctx, 1, 5)
 		if err != nil {
 			return nil, err
 		}
