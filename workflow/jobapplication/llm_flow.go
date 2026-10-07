@@ -8,18 +8,19 @@ import (
 )
 
 type agentLoopState struct {
-	ctx         workflow.Context
-	cancelCtx   workflow.Context
-	sessionCtx  workflow.Context
-	workflowID  string
-	input       jobApplicationRuntimeInput
-	jobDetails  *JobDetails
-	session     *applicationSession
-	result      *executeJobApplicationResult
-	toolHistory []ToolCallResult
-	qaMap       map[string]string
-	complete    bool
-	paused      bool
+	ctx             workflow.Context
+	cancelCtx       workflow.Context
+	sessionCtx      workflow.Context
+	workflowID      string
+	browserProvider string
+	input           jobApplicationRuntimeInput
+	jobDetails      *JobDetails
+	session         *applicationSession
+	result          *executeJobApplicationResult
+	toolHistory     []ToolCallResult
+	qaMap           map[string]string
+	complete        bool
+	paused          bool
 }
 
 // loopStep is what the planner sees for one iteration.

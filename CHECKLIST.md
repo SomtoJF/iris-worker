@@ -2,8 +2,8 @@
 
 ## Urgent
 
+- [ ] Figure out the best and cost-effective browser use model
 - [ ] Autoselect resumes with Jev
-- [ ] Migrate server infra to kernel
 - [ ] Cant scan this page. Basically anypage where greenhouse is embedded into the actual company's site, we can't scan [https://www.riskified.com/job-description/?gh_jid=8635191002#apply](https://www.riskified.com/job-description/?gh_jid=8635191002#apply)
 - [ ] Design a notification system for the extension that shows when:
   - an automated application is completed
@@ -23,6 +23,7 @@
 
 ## Completed
 
+- [x] Migrate server infra to kernel
 - [x] Make mobile responsive
 - [x] Inspect onboarding flow
 - [x] Add response status to application model

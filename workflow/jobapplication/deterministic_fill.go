@@ -1,6 +1,7 @@
 package jobapplication
 
 import (
+	"math/rand"
 	"time"
 
 	browseractivity "github.com/SomtoJF/iris-worker/activity/browser"
@@ -101,7 +102,15 @@ func fillDeterministicFields(
 		case FieldTypeOpenEnded, FieldTypeIgnore:
 			// Skip; let LLM handle these
 			logger.Debug("Skipping non-deterministic field", "field_index", field.Index, "type", field.Type)
+			continue
 		}
+
+		// wait a random number of seconds between 1 and 3 to simulate human-like delay
+		delay, err := RandomRangeSideEffect(ctx, 1, 3)
+		if err != nil {
+			return nil, err
+		}
+		workflow.Sleep(ctx, time.Duration(delay)*time.Second)
 	}
 
 	logger.Info("Deterministic fill complete",
@@ -111,6 +120,22 @@ func fillDeterministicFields(
 	)
 
 	return result, nil
+}
+
+func RandomRangeSideEffect(ctx workflow.Context, min, max int) (int, error) {
+	var result int
+
+	encodedValue := workflow.SideEffect(ctx, func(ctx workflow.Context) interface{} {
+		// This block executes ONLY ONCE during the initial execution.
+		// The result is recorded into the workflow history and replayed deterministically.
+		if max <= min {
+			return min
+		}
+		return rand.Intn(max-min+1) + min
+	})
+
+	err := encodedValue.Get(&result)
+	return result, err
 }
 
 // filterClassifiedFieldsForPlanner removes already-filled fields from consideration,

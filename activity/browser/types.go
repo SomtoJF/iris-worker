@@ -37,7 +37,8 @@ type OpenWebpageInput struct {
 }
 
 type OpenWebpageOutput struct {
-	ReplayRequired bool `json:"replay_required"`
+	ReplayRequired bool   `json:"replay_required"`
+	Provider       string `json:"provider,omitempty"`
 }
 
 type TakeScreenshotInput struct {

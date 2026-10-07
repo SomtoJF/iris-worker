@@ -36,6 +36,34 @@ func TestResolveApplicationBrowserIDReusesPersistedUUID(t *testing.T) {
 	}
 }
 
+func TestCaptureSolvedScreenshotSkipsCaptchaForKernelProvider(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	captchaDetectionCalled := false
+	env.RegisterActivityWithOptions(func(_ context.Context, _ browser.TakeScreenshotInput) (browser.TakeScreenshotOutput, error) {
+		return browser.TakeScreenshotOutput{Path: "screenshot.png"}, nil
+	}, sdkactivity.RegisterOptions{Name: "TakeScreenshot"})
+	env.RegisterActivityWithOptions(func(_ context.Context, _ browser.DetectCaptchaInput) (browser.DetectCaptchaOutput, error) {
+		captchaDetectionCalled = true
+		return browser.DetectCaptchaOutput{}, nil
+	}, sdkactivity.RegisterOptions{Name: "DetectCaptcha"})
+	env.ExecuteWorkflow(func(ctx workflow.Context) error {
+		ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute})
+		state := &agentLoopState{
+			sessionCtx:      ctx,
+			browserProvider: string(sqldb.BrowserProviderKernel),
+		}
+		_, err := captureSolvedScreenshot(state, 0)
+		return err
+	})
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("capture screenshot: %v", err)
+	}
+	if captchaDetectionCalled {
+		t.Fatal("captcha detection was called for the Kernel browser provider")
+	}
+}
+
 func TestResolveApplicationBrowserIDPersistsGeneratedUUID(t *testing.T) {
 	var mu sync.Mutex
 	var created sqldb.CreateApplicationBrowserIDInput

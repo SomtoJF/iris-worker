@@ -144,8 +144,12 @@ func TestActivityAdaptersForwardIDsAndMapDTOs(t *testing.T) {
 	a := NewActivities(client)
 	const workflowID = "wf-forwarding"
 
-	if _, err := a.OpenWebpage(ctx, OpenWebpageInput{WorkflowID: workflowID, Url: "https://example.test"}); err != nil {
+	opened, err := a.OpenWebpage(ctx, OpenWebpageInput{WorkflowID: workflowID, Url: "https://example.test"})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if opened.Provider != "fake" {
+		t.Fatalf("browser provider = %q, want configured provider fake", opened.Provider)
 	}
 	if client.startOpts.StartingURL != "https://example.test" {
 		t.Fatalf("starting URL = %q", client.startOpts.StartingURL)

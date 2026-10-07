@@ -42,8 +42,9 @@ func (a *Activity) OpenWebpage(ctx context.Context, input OpenWebpageInput) (Ope
 	}); err != nil {
 		return OpenWebpageOutput{}, err
 	}
+	provider := a.client.GetBrowserProvider()
 	if a.store == nil {
-		return OpenWebpageOutput{}, nil
+		return OpenWebpageOutput{Provider: provider}, nil
 	}
 	browserID, err := uuid.Parse(input.WorkflowID)
 	if err != nil {
@@ -53,7 +54,10 @@ func (a *Activity) OpenWebpage(ctx context.Context, input OpenWebpageInput) (Ope
 	if err != nil {
 		return OpenWebpageOutput{}, fmt.Errorf("read browser session after startup: %w", err)
 	}
-	return OpenWebpageOutput{ReplayRequired: afterFound && after.ReplayPending}, nil
+	if afterFound {
+		provider = string(after.Provider)
+	}
+	return OpenWebpageOutput{ReplayRequired: afterFound && after.ReplayPending, Provider: provider}, nil
 }
 
 func (a *Activity) TakeScreenshot(ctx context.Context, input TakeScreenshotInput) (TakeScreenshotOutput, error) {

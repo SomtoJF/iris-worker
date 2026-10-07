@@ -57,8 +57,10 @@ func replayBrowserMutations(ctx workflow.Context, workflowID string, userID, app
 		}).Get(ctx, nil); err != nil {
 			return diagnoseReplayFailure(ctx, workflowID, mutation, userID, applicationID, err)
 		}
-		if _, err := maybeSolveCaptcha(ctx, workflowID, userID, applicationID); err != nil {
-			return fmt.Errorf("captcha check after replay mutation %d: %w", mutation.IdBrowserMutationChangelog, err)
+		if replay.Provider != string(sqldb.BrowserProviderKernel) {
+			if _, err := maybeSolveCaptcha(ctx, workflowID, userID, applicationID); err != nil {
+				return fmt.Errorf("captcha check after replay mutation %d: %w", mutation.IdBrowserMutationChangelog, err)
+			}
 		}
 		if err := waitReplayPacingInterval(ctx); err != nil {
 			return err

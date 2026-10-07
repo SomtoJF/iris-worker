@@ -37,24 +37,25 @@ func loadApplicationInputs(cancelCtx workflow.Context, input jobApplicationRunti
 }
 
 // openApplicationPage opens the posting and replays prior browser mutations when needed.
-func openApplicationPage(ctx, sessionCtx workflow.Context, workflowID string, input jobApplicationRuntimeInput) error {
+func openApplicationPage(ctx, sessionCtx workflow.Context, workflowID string, input jobApplicationRuntimeInput) (string, error) {
 	replayVersion := workflow.GetVersion(ctx, "browser-mutation-replay-catchup", workflow.DefaultVersion, 1)
 	replayRequired := false
+	provider := ""
 	var openErr error
 	if replayVersion == 1 {
-		replayRequired, openErr = openWebpageWithReplayStatus(sessionCtx, workflowID, input.Url)
+		provider, replayRequired, openErr = openWebpageWithReplayStatus(sessionCtx, workflowID, input.Url)
 	} else {
-		openErr = openWebpage(sessionCtx, workflowID, input.Url)
+		provider, openErr = openWebpage(sessionCtx, workflowID, input.Url)
 	}
 	if openErr != nil {
-		return newJobAppError(openErr, "Failed to open webpage", "We couldn't open the job posting page")
+		return "", newJobAppError(openErr, "Failed to open webpage", "We couldn't open the job posting page")
 	}
 	if replayVersion == 1 && replayRequired {
 		if err := replayBrowserMutations(sessionCtx, workflowID, input.IdUser, input.IdJobApplication, input.Url); err != nil {
-			return newJobAppError(err, "Failed to replay browser mutations", "We couldn't safely restore the application page")
+			return "", newJobAppError(err, "Failed to replay browser mutations", "We couldn't safely restore the application page")
 		}
 	}
-	return nil
+	return provider, nil
 }
 
 // finishSessionSetup serializes the profile and loads a resumed user action, if any.

@@ -363,7 +363,8 @@ func executeJobApplication(
 		}
 	}()
 
-	if err := openApplicationPage(ctx, sessionCtx, workflowID, input); err != nil {
+	browserProvider, err := openApplicationPage(ctx, sessionCtx, workflowID, input)
+	if err != nil {
 		return err
 	}
 	if err := finishSessionSetup(ctx, session, input); err != nil {
@@ -371,16 +372,17 @@ func executeJobApplication(
 	}
 
 	state := &agentLoopState{
-		ctx:         ctx,
-		cancelCtx:   cancelCtx,
-		sessionCtx:  sessionCtx,
-		workflowID:  workflowID,
-		input:       input,
-		jobDetails:  jobDetails,
-		session:     session,
-		result:      result,
-		toolHistory: []ToolCallResult{},
-		qaMap:       make(map[string]string),
+		ctx:             ctx,
+		cancelCtx:       cancelCtx,
+		sessionCtx:      sessionCtx,
+		workflowID:      workflowID,
+		browserProvider: browserProvider,
+		input:           input,
+		jobDetails:      jobDetails,
+		session:         session,
+		result:          result,
+		toolHistory:     []ToolCallResult{},
+		qaMap:           make(map[string]string),
 	}
 
 	const maxAgentIterations = 50
@@ -429,6 +431,10 @@ func captureSolvedScreenshot(s *agentLoopState, iteration int) (browser.TakeScre
 	shot, err := takeScreenshot(s.sessionCtx, s.workflowID, fmt.Sprintf("screenshot_%d.png", iteration))
 	if err != nil {
 		return shot, newJobAppError(err, "Failed to take screenshot", "We couldn't continue the application because we failed to capture the page state")
+	}
+
+	if s.browserProvider == string(sqldb.BrowserProviderKernel) {
+		return shot, nil
 	}
 
 	solved, err := maybeSolveCaptcha(s.sessionCtx, s.workflowID, s.input.IdUser, s.input.IdJobApplication)
@@ -588,20 +594,22 @@ func handleApplicationSuccess(ctx workflow.Context, input jobApplicationRuntimeI
 	}).Get(ctx, nil)
 }
 
-func openWebpage(ctx workflow.Context, workflowID string, url string) error {
-	return workflow.ExecuteActivity(ctx, "OpenWebpage", browser.OpenWebpageInput{
-		Url:        url,
-		WorkflowID: workflowID,
-	}).Get(ctx, nil)
-}
-
-func openWebpageWithReplayStatus(ctx workflow.Context, workflowID string, url string) (bool, error) {
+func openWebpage(ctx workflow.Context, workflowID string, url string) (string, error) {
 	var result browser.OpenWebpageOutput
 	err := workflow.ExecuteActivity(ctx, "OpenWebpage", browser.OpenWebpageInput{
 		Url:        url,
 		WorkflowID: workflowID,
 	}).Get(ctx, &result)
-	return result.ReplayRequired, err
+	return result.Provider, err
+}
+
+func openWebpageWithReplayStatus(ctx workflow.Context, workflowID string, url string) (string, bool, error) {
+	var result browser.OpenWebpageOutput
+	err := workflow.ExecuteActivity(ctx, "OpenWebpage", browser.OpenWebpageInput{
+		Url:        url,
+		WorkflowID: workflowID,
+	}).Get(ctx, &result)
+	return result.Provider, result.ReplayRequired, err
 }
 
 func updateJobApplicationStatus(ctx workflow.Context, idJobApplication uint, status sqldb.JobApplicationStatus, reason *string) error {
