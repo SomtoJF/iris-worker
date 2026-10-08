@@ -117,7 +117,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	logger.Info("JobApplicationWorkflow started", "id_job_application", input.IdJobApplication)
 
 	activityOptions := workflow.ActivityOptions{
-		StartToCloseTimeout: 5 * time.Minute,
+		StartToCloseTimeout: 2 * time.Minute,
 		RetryPolicy: &temporal.RetryPolicy{
 			InitialInterval:    time.Second,
 			BackoffCoefficient: 2.0,
@@ -126,6 +126,26 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		},
 	}
 	ctx = workflow.WithActivityOptions(ctx, activityOptions)
+	defer notifyBrowserPoolApplicationSettled(ctx, input)
+
+	// Set up cancellation signal listener
+	cancelCtx, cancelFunc := workflow.WithCancel(ctx)
+	var cancelPayload CancelSignalPayload
+	timedOut := false
+
+	workflow.Go(ctx, func(gCtx workflow.Context) {
+		if err := workflow.NewTimer(gCtx, SESSION_TIMEOUT).Get(gCtx, nil); err != nil {
+			return
+		}
+		timedOut = true
+		cancelFunc()
+	})
+
+	workflow.Go(cancelCtx, func(gCtx workflow.Context) {
+		signalChan := workflow.GetSignalChannel(gCtx, CancelSignalName)
+		signalChan.Receive(gCtx, &cancelPayload)
+		cancelFunc()
+	})
 
 	var application sqldb.JobApplication
 	if err := workflow.ExecuteActivity(ctx, "GetJobApplication", sqldb.GetJobApplicationInput{
@@ -164,30 +184,10 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	}
 	durableResumeVersion := workflow.GetVersion(ctx, "durable-user-action-resume", workflow.DefaultVersion, 1)
 	runtimeInput.DurableResumeVersion = durableResumeVersion == 1
-	defer notifyBrowserPoolApplicationSettled(ctx, runtimeInput)
 
 	if workflow.GetVersion(ctx, "mark-application-processing", workflow.DefaultVersion, 1) == 1 {
 		markApplicationProcessing(ctx, runtimeInput, jobDetails)
 	}
-
-	// Set up cancellation signal listener
-	cancelCtx, cancelFunc := workflow.WithCancel(ctx)
-	var cancelPayload CancelSignalPayload
-	timedOut := false
-
-	workflow.Go(ctx, func(gCtx workflow.Context) {
-		if err := workflow.NewTimer(gCtx, SESSION_TIMEOUT).Get(gCtx, nil); err != nil {
-			return
-		}
-		timedOut = true
-		cancelFunc()
-	})
-
-	workflow.Go(cancelCtx, func(gCtx workflow.Context) {
-		signalChan := workflow.GetSignalChannel(gCtx, CancelSignalName)
-		signalChan.Receive(gCtx, &cancelPayload)
-		cancelFunc()
-	})
 
 	var execResult executeJobApplicationResult
 
@@ -319,7 +319,7 @@ func beginBrowserReplayGeneration(ctx workflow.Context, startNewGeneration bool,
 	}).Get(ctx, nil)
 }
 
-func notifyBrowserPoolApplicationSettled(ctx workflow.Context, input jobApplicationRuntimeInput) {
+func notifyBrowserPoolApplicationSettled(ctx workflow.Context, input JobApplicationWorkflowInput) {
 	if input.BrowserPoolWorkflowID == "" {
 		return
 	}
@@ -371,10 +371,21 @@ func executeJobApplication(
 		return err
 	}
 
+	// screenshotCtx is used to capture screenshots for LLM
+	screenCtx := workflow.WithActivityOptions(sessionCtx,
+		workflow.ActivityOptions{
+			StartToCloseTimeout: 10 * time.Second,
+			RetryPolicy: &temporal.RetryPolicy{
+				MaximumAttempts: 10,
+				MaximumInterval: 10 * time.Second,
+			},
+		})
+
 	state := &agentLoopState{
 		ctx:             ctx,
 		cancelCtx:       cancelCtx,
 		sessionCtx:      sessionCtx,
+		screenCtx:       screenCtx,
 		workflowID:      workflowID,
 		browserProvider: browserProvider,
 		input:           input,
@@ -428,7 +439,7 @@ func takeScreenshot(ctx workflow.Context, workflowID, fileName string) (browser.
 // captureSolvedScreenshot screenshots the page after deterministically clearing any captcha,
 // so the planner never has to reason about captchas.
 func captureSolvedScreenshot(s *agentLoopState, iteration int) (browser.TakeScreenshotOutput, error) {
-	shot, err := takeScreenshot(s.sessionCtx, s.workflowID, fmt.Sprintf("screenshot_%d.png", iteration))
+	shot, err := takeScreenshot(s.screenCtx, s.workflowID, fmt.Sprintf("screenshot_%d.png", iteration))
 	if err != nil {
 		return shot, newJobAppError(err, "Failed to take screenshot", "We couldn't continue the application because we failed to capture the page state")
 	}
@@ -519,7 +530,10 @@ func closeApplicationBrowser(ctx workflow.Context, workflowID string) error {
 	cleanupCtx, _ := workflow.NewDisconnectedContext(ctx)
 	cleanupCtx = workflow.WithActivityOptions(cleanupCtx, workflow.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
-		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
+		RetryPolicy: &temporal.RetryPolicy{
+			MaximumAttempts: 10,
+			MaximumInterval: 30 * time.Second,
+		},
 	})
 	return workflow.ExecuteActivity(cleanupCtx, "ClosePage", browser.ClosePageInput{
 		WorkflowID: workflowID,

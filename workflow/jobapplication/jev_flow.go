@@ -14,7 +14,7 @@ func runJevFlow(s *agentLoopState, iteration int, shot browser.TakeScreenshotOut
 
 	classified, err := classifyFieldsWithJev(
 		s.sessionCtx, s.workflowID, s.input.IdUser, s.input.IdJobApplication,
-		shot.TaggedNodes, s.session.UserProfile,
+		shot.TaggedNodes, shot.TaggedFileInputNodes, s.session.UserProfile,
 	)
 	if err != nil {
 		logger.Warn("JEV field classification failed, falling back to LLM-only mode", "error", err)

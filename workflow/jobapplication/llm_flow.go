@@ -11,6 +11,7 @@ type agentLoopState struct {
 	ctx             workflow.Context
 	cancelCtx       workflow.Context
 	sessionCtx      workflow.Context
+	screenCtx       workflow.Context
 	workflowID      string
 	browserProvider string
 	input           jobApplicationRuntimeInput

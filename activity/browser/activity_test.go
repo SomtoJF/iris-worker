@@ -333,6 +333,64 @@ func TestReplaySafetyRequiresSemanticNonSecretTarget(t *testing.T) {
 	}
 }
 
+func TestReconcileBrowserMutationRecognizesObservableEffects(t *testing.T) {
+	tests := []struct {
+		name       string
+		operation  string
+		arguments  string
+		context    sqldb.BrowserMutationContext
+		screenshot browsertype.Screenshot
+	}{
+		{
+			name:       "navigation",
+			operation:  "navigate",
+			arguments:  `{"url":"https://example.test/done"}`,
+			screenshot: browsertype.Screenshot{CurrentURL: "https://example.test/done"},
+		},
+		{
+			name:      "text input",
+			operation: "input_text",
+			arguments: `{"text":"user@example.test"}`,
+			context: sqldb.BrowserMutationContext{
+				Target: &sqldb.BrowserMutationTarget{Role: "textbox", Name: "Email"},
+			},
+			screenshot: browsertype.Screenshot{TaggedNodes: []browsertype.TaggedNode{
+				{Index: 4, Role: "textbox", Name: "Email", Value: stringPointer("user@example.test")},
+			}},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			activity := NewActivities(&fakeBrowserClient{screenshot: test.screenshot})
+			applied, err := activity.reconcileBrowserMutation(
+				context.Background(),
+				"workflow-id",
+				test.operation,
+				sqldb.BrowserMutationChangelog{Context: test.context},
+				[]byte(test.arguments),
+			)
+			if err != nil || !applied {
+				t.Fatalf("reconciliation = (%t, %v), want (true, nil)", applied, err)
+			}
+		})
+	}
+}
+
+func TestReconcileBrowserMutationLeavesUnobservableOutcomesUncertain(t *testing.T) {
+	activity := NewActivities(&fakeBrowserClient{})
+	applied, err := activity.reconcileBrowserMutation(
+		context.Background(),
+		"workflow-id",
+		"click",
+		sqldb.BrowserMutationChangelog{},
+		[]byte(`{"element_index":1}`),
+	)
+	if err != nil || applied {
+		t.Fatalf("reconciliation = (%t, %v), want (false, nil)", applied, err)
+	}
+}
+
 func TestGetBase64ScreenshotFilesystemBehavior(t *testing.T) {
 	path := t.TempDir() + "/shot.jpg"
 	if err := os.WriteFile(path, []byte("image-bytes"), 0600); err != nil {

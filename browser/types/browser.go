@@ -2,6 +2,25 @@ package types
 
 type ApplicationBrowserID string
 
+type MutationNotExecutedError struct {
+	err error
+}
+
+func (e MutationNotExecutedError) Error() string {
+	return e.err.Error()
+}
+
+func (e MutationNotExecutedError) Unwrap() error {
+	return e.err
+}
+
+func MutationNotExecuted(err error) error {
+	if err == nil {
+		return nil
+	}
+	return MutationNotExecutedError{err: err}
+}
+
 type BrowserOptions struct {
 	StartingURL string `json:"starting_url"`
 }

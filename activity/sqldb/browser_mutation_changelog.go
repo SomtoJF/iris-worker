@@ -193,6 +193,26 @@ func (s *BrowserStore) MarkBrowserMutationFailed(ctx context.Context, mutationID
 	return s.setBrowserMutationStatus(ctx, mutationID, BrowserMutationFailed, sanitizedResult)
 }
 
+func (s *BrowserStore) PrepareBrowserMutationRetry(ctx context.Context, mutationID uint) error {
+	if err := s.ready(); err != nil {
+		return err
+	}
+	if mutationID == 0 {
+		return fmt.Errorf("browser mutation id is required")
+	}
+	now := time.Now().UTC()
+	update := s.db.WithContext(ctx).Model(&BrowserMutationChangelog{}).
+		Where("id_browser_mutation_changelog = ? AND status = ?", mutationID, BrowserMutationFailed).
+		Updates(map[string]any{"status": BrowserMutationPending, "result": nil, "completed_at": nil, "updated_at": now})
+	if update.Error != nil {
+		return fmt.Errorf("prepare browser mutation retry: %w", update.Error)
+	}
+	if update.RowsAffected == 0 {
+		return fmt.Errorf("prepare browser mutation retry: %w", ErrBrowserMutationStateConflict)
+	}
+	return nil
+}
+
 func (s *BrowserStore) MarkBrowserMutationReconcileRequired(ctx context.Context, mutationID uint, sanitizedResult *BrowserMutationResult) error {
 	return s.setBrowserMutationStatus(ctx, mutationID, BrowserMutationReconcileRequired, sanitizedResult)
 }

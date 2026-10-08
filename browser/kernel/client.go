@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	defaultTimeoutSeconds = 60 * 60
+	defaultTimeoutSeconds = 60 * 2 // timeout after 2 minutes of inactivity
 	cleanupTimeout        = 30 * time.Second
 	profileLeaseBuffer    = 5 * time.Minute
 )

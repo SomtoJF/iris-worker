@@ -14,12 +14,12 @@ import (
 func (c *RodBrowserClient) Navigate(ctx context.Context, id types.ApplicationBrowserID, targetURL string) error {
 	s, err := c.get(ctx, id)
 	if err != nil {
-		return err
+		return types.MutationNotExecuted(err)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ensureSessionOpen(s); err != nil {
-		return err
+		return types.MutationNotExecuted(err)
 	}
 	page := s.page.Context(ctx)
 	if err := page.Navigate(targetURL); err != nil {
@@ -381,16 +381,16 @@ func findTaggedNode(nodes []taggedNode, index int) (*rod.Element, error) {
 func (c *RodBrowserClient) Click(ctx context.Context, id types.ApplicationBrowserID, elementIndex int) error {
 	s, err := c.get(ctx, id)
 	if err != nil {
-		return err
+		return types.MutationNotExecuted(err)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ensureSessionOpen(s); err != nil {
-		return err
+		return types.MutationNotExecuted(err)
 	}
 	element, err := findTaggedNode(s.taggedNodes, elementIndex)
 	if err != nil {
-		return err
+		return types.MutationNotExecuted(err)
 	}
 	page := s.page.Context(ctx)
 	element = element.Context(ctx)
@@ -430,17 +430,17 @@ func clickElement(element *rod.Element) error {
 func (c *RodBrowserClient) Type(ctx context.Context, id types.ApplicationBrowserID, field types.FieldInput) error {
 	s, err := c.get(ctx, id)
 	if err != nil {
-		return err
+		return types.MutationNotExecuted(err)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ensureSessionOpen(s); err != nil {
-		return err
+		return types.MutationNotExecuted(err)
 	}
 	page := s.page.Context(ctx)
 	element, err := findTaggedNode(s.taggedNodes, field.ElementIndex)
 	if err != nil {
-		return err
+		return types.MutationNotExecuted(err)
 	}
 	element = element.Context(ctx)
 	if err := typeField(page, element, s.taggedNodes, field); err != nil {
@@ -452,7 +452,7 @@ func (c *RodBrowserClient) Type(ctx context.Context, id types.ApplicationBrowser
 func typeField(page *rod.Page, element *rod.Element, nodes []taggedNode, field types.FieldInput) error {
 	editable, err := elementIsEditable(element)
 	if err != nil {
-		return fmt.Errorf("failed to inspect element %d: %w", field.ElementIndex, err)
+		return types.MutationNotExecuted(fmt.Errorf("failed to inspect element %d: %w", field.ElementIndex, err))
 	}
 	if !editable {
 		role := ""
@@ -462,7 +462,7 @@ func typeField(page *rod.Page, element *rod.Element, nodes []taggedNode, field t
 				break
 			}
 		}
-		return fmt.Errorf("element index %d is not editable (role=%q tag); use click for buttons/radios/checkboxes", field.ElementIndex, role)
+		return types.MutationNotExecuted(fmt.Errorf("element index %d is not editable (role=%q tag); use click for buttons/radios/checkboxes", field.ElementIndex, role))
 	}
 	if field.Replace {
 		if err := clearElementText(element); err != nil {
@@ -504,12 +504,12 @@ func (c *RodBrowserClient) Scroll(ctx context.Context, id types.ApplicationBrows
 	}
 	s, err := c.get(ctx, id)
 	if err != nil {
-		return err
+		return types.MutationNotExecuted(err)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ensureSessionOpen(s); err != nil {
-		return err
+		return types.MutationNotExecuted(err)
 	}
 	page := s.page.Context(ctx)
 	_, err = page.Eval(`(ratio,mult)=>{window.scrollBy({top:window.innerHeight*ratio*mult,behavior:'instant'});}`, ratio, multiplier)
@@ -523,18 +523,18 @@ func (c *RodBrowserClient) Scroll(ctx context.Context, id types.ApplicationBrows
 func (c *RodBrowserClient) UploadFile(ctx context.Context, id types.ApplicationBrowserID, fileInputIndex int, filePath string) error {
 	s, err := c.get(ctx, id)
 	if err != nil {
-		return err
+		return types.MutationNotExecuted(err)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ensureSessionOpen(s); err != nil {
-		return err
+		return types.MutationNotExecuted(err)
 	}
 	page := s.page.Context(ctx)
 	if len(s.fileInputs) == 0 {
 		_, _, inputs, getErr := screenshotForLLM(page, c.screenshotPath("temp.png"))
 		if getErr != nil {
-			return fmt.Errorf("get tagged file inputs: %w", getErr)
+			return types.MutationNotExecuted(fmt.Errorf("get tagged file inputs: %w", getErr))
 		}
 		s.fileInputs = inputs
 	}
@@ -543,7 +543,7 @@ func (c *RodBrowserClient) UploadFile(ctx context.Context, id types.ApplicationB
 		indices = append(indices, input.dto.Index)
 		if input.dto.Index == fileInputIndex {
 			if input.element == nil {
-				return fmt.Errorf("file input at index %d has no DOM element", fileInputIndex)
+				return types.MutationNotExecuted(fmt.Errorf("file input at index %d has no DOM element", fileInputIndex))
 			}
 			if err := input.element.Context(ctx).SetFiles([]string{filePath}); err != nil {
 				return fmt.Errorf("failed to upload file: %w", err)
@@ -551,5 +551,5 @@ func (c *RodBrowserClient) UploadFile(ctx context.Context, id types.ApplicationB
 			return nil
 		}
 	}
-	return fmt.Errorf("file input index %d not found among %d tagged file inputs (indices=%v)", fileInputIndex, len(s.fileInputs), indices)
+	return types.MutationNotExecuted(fmt.Errorf("file input index %d not found among %d tagged file inputs (indices=%v)", fileInputIndex, len(s.fileInputs), indices))
 }

@@ -10,11 +10,42 @@ import (
 	"github.com/SomtoJF/iris-worker/activity/browser"
 	"github.com/SomtoJF/iris-worker/activity/realtimeevent"
 	"github.com/SomtoJF/iris-worker/activity/sqldb"
+	"github.com/SomtoJF/iris-worker/aipi/types"
 	"github.com/google/uuid"
 	sdkactivity "go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/workflow"
 )
+
+func TestParseClassificationSeparatesFileInputIndices(t *testing.T) {
+	label := "Resume"
+	classified, err := parseClassificationResponse(types.JevResponse{
+		Answers: map[string]types.JevAnswer{
+			"field_0_type":      {Type: "choice", Choice: string(FieldTypeStructured)},
+			"file_input_0_type": {Type: "choice", Choice: string(FieldTypeResume)},
+		},
+	}, []browser.SerializableTaggedNode{{
+		Index: 0,
+		Label: "Email",
+	}}, []browser.SerializableTaggedFileInputNode{{
+		Index: 0,
+		Name:  "resume",
+		Label: &label,
+	}})
+	if err != nil {
+		t.Fatalf("parse classification response: %v", err)
+	}
+	if len(classified) != 2 {
+		t.Fatalf("classified %d fields, want 2: %+v", len(classified), classified)
+	}
+	if classified[0].Type != FieldTypeStructured || classified[0].Index != 0 || classified[0].FileInputIndex != nil {
+		t.Fatalf("interactive field classification = %+v", classified[0])
+	}
+	if classified[1].Type != FieldTypeResume || classified[1].FileInputIndex == nil ||
+		*classified[1].FileInputIndex != 0 || classified[1].Label != "Resume" {
+		t.Fatalf("file input classification = %+v", classified[1])
+	}
+}
 
 func TestResolveApplicationBrowserIDReusesPersistedUUID(t *testing.T) {
 	want := uuid.NewString()

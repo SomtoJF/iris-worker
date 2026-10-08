@@ -25,6 +25,7 @@ const (
 // ClassifiedField represents a form field and how it should be filled
 type ClassifiedField struct {
 	Index            int
+	FileInputIndex   *int
 	Label            string
 	Description      string
 	Type             FieldClassificationType
@@ -45,14 +46,15 @@ func classifyFieldsWithJev(
 	userID uint,
 	applicationID uint,
 	taggedNodes []browser.SerializableTaggedNode,
+	taggedFileInputNodes []browser.SerializableTaggedFileInputNode,
 	userProfile jobapplicationprofile.UserProfile,
 ) (*FieldClassificationResult, error) {
-	if len(taggedNodes) == 0 {
+	if len(taggedNodes) == 0 && len(taggedFileInputNodes) == 0 {
 		return &FieldClassificationResult{Fields: []ClassifiedField{}}, nil
 	}
 
 	// Serialize tagged nodes as accessibility tree state for JEV
-	stateText := serializeTaggedNodesForJev(taggedNodes, userProfile)
+	stateText := serializeTaggedNodesForJev(taggedNodes, taggedFileInputNodes, userProfile)
 
 	jevCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
@@ -75,10 +77,28 @@ func classifyFieldsWithJev(
 				node.Index, node.Label, node.Description,
 			),
 			Criteria: map[string]string{
-				"resume_file": "File upload field specifically for resume/CV PDF",
-				"structured":  "Structured field like email, phone, country, name, or LinkedIn URL",
-				"open_ended":  "Open-ended text field like motivation, why join, cover letter, or essay",
-				"ignore":      "Hidden field, already filled, or not meant to be filled by applicant",
+				"structured": "Structured field like email, phone, country, name, or LinkedIn URL",
+				"open_ended": "Open-ended text field like motivation, why join, cover letter, or essay",
+				"ignore":     "Hidden field, already filled, or not meant to be filled by applicant",
+			},
+		}
+	}
+
+	for _, node := range taggedFileInputNodes {
+		fieldKey := fmt.Sprintf("file_input_%d_type", node.Index)
+		label := ""
+		if node.Label != nil {
+			label = *node.Label
+		}
+		questions[fieldKey] = types.JevQuestion{
+			Type: "choice",
+			Instructions: fmt.Sprintf(
+				"For file input at index %d (name: '%s', label: '%s'), is this specifically for uploading the applicant's resume/CV?",
+				node.Index, node.Name, label,
+			),
+			Criteria: map[string]string{
+				"resume_file": "File input intended for the applicant's resume or CV",
+				"ignore":      "Any other file input, or a file input not intended for the resume/CV",
 			},
 		}
 	}
@@ -117,7 +137,7 @@ func classifyFieldsWithJev(
 	}
 
 	// Parse JEV response and build classified fields list
-	classified, err := parseClassificationResponse(result, taggedNodes)
+	classified, err := parseClassificationResponse(result, taggedNodes, taggedFileInputNodes)
 	if err != nil {
 		return nil, fmt.Errorf("parse JEV classification: %w", err)
 	}
@@ -129,6 +149,7 @@ func classifyFieldsWithJev(
 // that JEV can process without images.
 func serializeTaggedNodesForJev(
 	taggedNodes []browser.SerializableTaggedNode,
+	taggedFileInputNodes []browser.SerializableTaggedFileInputNode,
 	userProfile jobapplicationprofile.UserProfile,
 ) string {
 	var sb strings.Builder
@@ -152,6 +173,20 @@ func serializeTaggedNodesForJev(
 		sb.WriteString("\n")
 	}
 
+	if len(taggedFileInputNodes) > 0 {
+		sb.WriteString("\nFILE INPUTS:\n")
+		sb.WriteString("============\n\n")
+		for _, node := range taggedFileInputNodes {
+			label := ""
+			if node.Label != nil {
+				label = *node.Label
+			}
+			sb.WriteString(fmt.Sprintf("File Input Index %d:\n", node.Index))
+			sb.WriteString(fmt.Sprintf("  Name: %s\n", node.Name))
+			sb.WriteString(fmt.Sprintf("  Label: %s\n\n", label))
+		}
+	}
+
 	sb.WriteString("\nUSER PROFILE DATA AVAILABLE:\n")
 	sb.WriteString("=============================\n")
 	sb.WriteString(fmt.Sprintf("First Name: %s\n", userProfile.FirstName))
@@ -168,6 +203,7 @@ func serializeTaggedNodesForJev(
 func parseClassificationResponse(
 	result types.JevResponse,
 	taggedNodes []browser.SerializableTaggedNode,
+	taggedFileInputNodes []browser.SerializableTaggedFileInputNode,
 ) ([]ClassifiedField, error) {
 	var classified []ClassifiedField
 
@@ -199,6 +235,25 @@ func parseClassificationResponse(
 		}
 
 		classified = append(classified, cf)
+	}
+
+	for _, node := range taggedFileInputNodes {
+		fieldKey := fmt.Sprintf("file_input_%d_type", node.Index)
+		typeAnswer, ok := result.Answers[fieldKey]
+		if !ok || typeAnswer.Type != "choice" || typeAnswer.Choice != string(FieldTypeResume) {
+			continue
+		}
+
+		label := node.Name
+		if node.Label != nil && *node.Label != "" {
+			label = *node.Label
+		}
+		fileInputIndex := node.Index
+		classified = append(classified, ClassifiedField{
+			FileInputIndex: &fileInputIndex,
+			Label:          label,
+			Type:           FieldTypeResume,
+		})
 	}
 
 	return classified, nil

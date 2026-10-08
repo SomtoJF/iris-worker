@@ -538,30 +538,95 @@ func (a *Activity) mutate(ctx context.Context, workflowID, operation string, arg
 		if mutation.Status == sqldb.BrowserMutationApplied {
 			return nil
 		}
-		return temporal.NewNonRetryableApplicationError(
-			fmt.Sprintf("%s browser mutation is not safely retryable and requires reconciliation", operation),
-			"BrowserMutationReconciliationRequired",
-			nil,
-		)
+		if mutation.Status == sqldb.BrowserMutationFailed {
+			if err := a.store.PrepareBrowserMutationRetry(ctx, mutation.IdBrowserMutationChangelog); err != nil {
+				return fmt.Errorf("prepare %s browser mutation retry: %w", operation, err)
+			}
+		} else if mutation.Status == sqldb.BrowserMutationPending || mutation.Status == sqldb.BrowserMutationReconcileRequired {
+			applied, reconcileErr := a.reconcileBrowserMutation(ctx, workflowID, operation, mutation, argumentsJSON)
+			if reconcileErr == nil && applied {
+				if err := a.store.MarkBrowserMutationApplied(ctx, mutation.IdBrowserMutationChangelog, &sqldb.BrowserMutationResult{
+					Outcome:    sqldb.BrowserMutationOutcomeApplied,
+					ReplaySafe: mutation.Context.ReplaySafe,
+				}); err != nil {
+					return fmt.Errorf("mark reconciled %s browser mutation applied: %w", operation, err)
+				}
+				return nil
+			}
+			return temporal.NewNonRetryableApplicationError(
+				fmt.Sprintf("%s browser mutation outcome remains uncertain and requires reconciliation", operation),
+				"BrowserMutationReconciliationRequired",
+				reconcileErr,
+			)
+		} else {
+			return temporal.NewNonRetryableApplicationError(
+				fmt.Sprintf("%s browser mutation has an unsupported status and requires reconciliation", operation),
+				"BrowserMutationReconciliationRequired",
+				nil,
+			)
+		}
 	}
 	if err := execute(); err != nil {
-		statusErr := a.store.MarkBrowserMutationReconcileRequired(ctx, mutation.IdBrowserMutationChangelog, &sqldb.BrowserMutationResult{
-			Outcome: sqldb.BrowserMutationOutcomeUncertain,
-		})
+		var notExecuted browsertype.MutationNotExecutedError
+		statusErr := error(nil)
+		if errors.As(err, &notExecuted) {
+			statusErr = a.store.MarkBrowserMutationFailed(ctx, mutation.IdBrowserMutationChangelog, &sqldb.BrowserMutationResult{
+				Outcome: sqldb.BrowserMutationOutcomeFailed,
+			})
+		} else {
+			statusErr = a.store.MarkBrowserMutationReconcileRequired(ctx, mutation.IdBrowserMutationChangelog, &sqldb.BrowserMutationResult{
+				Outcome: sqldb.BrowserMutationOutcomeUncertain,
+			})
+		}
 		return errors.Join(fmt.Errorf("%s browser operation: %w", operation, err), statusErr)
 	}
 	result := &sqldb.BrowserMutationResult{
 		Outcome:    sqldb.BrowserMutationOutcomeApplied,
-		ReplaySafe: mutationContext.ReplaySafe,
+		ReplaySafe: mutation.Context.ReplaySafe,
 	}
-	markApplied := a.store.MarkBrowserMutationReconcileRequired
-	if mutationContext.ReplaySafe {
-		markApplied = a.store.MarkBrowserMutationApplied
-	}
-	if err := markApplied(ctx, mutation.IdBrowserMutationChangelog, result); err != nil {
+	if err := a.store.MarkBrowserMutationApplied(ctx, mutation.IdBrowserMutationChangelog, result); err != nil {
 		return fmt.Errorf("mark %s browser mutation applied: %w", operation, err)
 	}
 	return nil
+}
+
+func (a *Activity) reconcileBrowserMutation(ctx context.Context, workflowID, operation string, mutation sqldb.BrowserMutationChangelog, arguments []byte) (bool, error) {
+	screenshot, err := a.client.ScreenshotForLLM(ctx, applicationBrowserID(workflowID), "browser_mutation_reconciliation.png")
+	if err != nil {
+		return false, fmt.Errorf("inspect browser state: %w", err)
+	}
+
+	var args map[string]json.RawMessage
+	if err := json.Unmarshal(arguments, &args); err != nil {
+		return false, fmt.Errorf("decode mutation arguments for reconciliation: %w", err)
+	}
+
+	switch operation {
+	case "navigate":
+		var targetURL string
+		if err := json.Unmarshal(args["url"], &targetURL); err != nil {
+			return false, fmt.Errorf("decode navigation URL for reconciliation: %w", err)
+		}
+		return targetURL != "" && screenshot.CurrentURL == targetURL, nil
+	case "input_text", "input_multiple":
+		if mutation.Context.Target == nil || strings.EqualFold(mutation.Context.Target.Role, "password") {
+			return false, nil
+		}
+		var text string
+		if err := json.Unmarshal(args["text"], &text); err != nil {
+			return false, fmt.Errorf("decode input text for reconciliation: %w", err)
+		}
+		index, err := resolveTaggedTarget(screenshot.TaggedNodes, mutation.Context.Target)
+		if err != nil {
+			return false, nil
+		}
+		for _, node := range screenshot.TaggedNodes {
+			if node.Index == index {
+				return node.Value != nil && *node.Value == text, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func isReplaySafeTarget(operation string, target *sqldb.BrowserMutationTarget) bool {

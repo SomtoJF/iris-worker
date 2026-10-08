@@ -8,19 +8,21 @@ import (
 	"fmt"
 	"math"
 	"mime"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/SomtoJF/iris-worker/browser/types"
+	kernelsdk "github.com/kernel/kernel-go-sdk"
 )
 
 const pagePrelude = `if (!page) throw new Error("no active page");`
 
 func (c *KernelBrowserClient) Navigate(ctx context.Context, id types.ApplicationBrowserID, url string) error {
 	if strings.TrimSpace(url) == "" {
-		return errors.New("navigation URL is required")
+		return types.MutationNotExecuted(errors.New("navigation URL is required"))
 	}
 	code := pagePrelude + ` await page.goto(` + jsString(url) + `, { waitUntil: "domcontentloaded" }); return true;`
 	return c.execute(ctx, id, code, nil)
@@ -33,6 +35,8 @@ func (c *KernelBrowserClient) ScreenshotForLLM(ctx context.Context, id types.App
 	const code = `
 ` + pagePrelude + `
 const snapshot = await page.evaluate(() => {
+  document.querySelectorAll("[data-iris-browser-index]").forEach(el => el.removeAttribute("data-iris-browser-index"));
+  document.querySelectorAll("[data-iris-file-index]").forEach(el => el.removeAttribute("data-iris-file-index"));
   const visible = (el) => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none" && !el.disabled && el.getAttribute("aria-disabled") !== "true"; };
   const candidates = [...document.querySelectorAll('button,input,textarea,select,a,[role="button"],[role="textbox"],[role="checkbox"],[role="radio"],[role="combobox"],[role="switch"],[contenteditable="true"]')].filter(visible);
   const roleOf = (el) => {
@@ -60,7 +64,10 @@ const snapshot = await page.evaluate(() => {
     const r = el.getBoundingClientRect();
     const label = labelOf(el) || el.getAttribute("aria-label") || "";
     const name = el.getAttribute("aria-label") || label || el.getAttribute("placeholder") || el.getAttribute("title") || el.innerText || el.textContent || el.getAttribute("name") || "";
-    return {index, description:name.trim().slice(0,500), name:name.trim().slice(0,500), label:label.trim().slice(0,500), selector:selectorOf(el), submit:isFinalSubmit(el, name, label), x:r.x, y:r.y, width:r.width, height:r.height, role:roleOf(el), value:el.value || null, required:typeof el.required === "boolean" ? el.required : null, checked:typeof el.checked === "boolean" ? String(el.checked) : null};
+
+    const role = roleOf(el);
+    const value = role === "password" ? "<redacted>" : (el.value || null);
+    return {index, description:name.trim().slice(0,500), name:name.trim().slice(0,500), label:label.trim().slice(0,500), selector:selectorOf(el), submit:isFinalSubmit(el, name, label), x:r.x, y:r.y, width:r.width, height:r.height, role, value, required:typeof el.required === "boolean" ? el.required : null, checked:typeof el.checked === "boolean" ? String(el.checked) : null};
   });
   const files = [...document.querySelectorAll('input[type="file"]')].filter(visible).map((el, index) => {
     el.setAttribute("data-iris-file-index", String(index));
@@ -111,7 +118,7 @@ return {image, nodes:snapshot.nodes, files:snapshot.files, current_url:snapshot.
 
 func (c *KernelBrowserClient) Click(ctx context.Context, id types.ApplicationBrowserID, elementIndex int) error {
 	if elementIndex < 0 {
-		return errors.New("element index cannot be negative")
+		return types.MutationNotExecuted(errors.New("element index cannot be negative"))
 	}
 	selector := fmt.Sprintf(`[data-iris-browser-index="%d"]`, elementIndex)
 	code := pagePrelude + ` const el = page.locator(` + jsString(selector) + `); if (await el.count() === 0) throw new Error("element index not found"); await el.first().click(); return true;`
@@ -120,7 +127,7 @@ func (c *KernelBrowserClient) Click(ctx context.Context, id types.ApplicationBro
 
 func (c *KernelBrowserClient) Type(ctx context.Context, id types.ApplicationBrowserID, field types.FieldInput) error {
 	if field.ElementIndex < 0 {
-		return errors.New("element index cannot be negative")
+		return types.MutationNotExecuted(errors.New("element index cannot be negative"))
 	}
 	selector := fmt.Sprintf(`[data-iris-browser-index="%d"]`, field.ElementIndex)
 	method := "type"
@@ -133,10 +140,10 @@ func (c *KernelBrowserClient) Type(ctx context.Context, id types.ApplicationBrow
 
 func (c *KernelBrowserClient) Scroll(ctx context.Context, id types.ApplicationBrowserID, direction string, ratio float64) error {
 	if math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio <= 0 || ratio > 1 {
-		return errors.New("scroll ratio must be greater than zero and at most one")
+		return types.MutationNotExecuted(errors.New("scroll ratio must be greater than zero and at most one"))
 	}
 	if direction != "up" && direction != "down" && direction != "left" && direction != "right" {
-		return fmt.Errorf("unsupported scroll direction %q", direction)
+		return types.MutationNotExecuted(fmt.Errorf("unsupported scroll direction %q", direction))
 	}
 	delta := ratio
 	if direction == "up" || direction == "left" {
@@ -154,11 +161,11 @@ func (c *KernelBrowserClient) Scroll(ctx context.Context, id types.ApplicationBr
 
 func (c *KernelBrowserClient) UploadFile(ctx context.Context, id types.ApplicationBrowserID, fileInputIndex int, filePath string) error {
 	if fileInputIndex < 0 {
-		return errors.New("file input index cannot be negative")
+		return types.MutationNotExecuted(errors.New("file input index cannot be negative"))
 	}
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		return fmt.Errorf("read upload file: %w", err)
+		return types.MutationNotExecuted(fmt.Errorf("read upload file: %w", err))
 	}
 	selector := fmt.Sprintf(`[data-iris-file-index="%d"]`, fileInputIndex)
 	filename := filepath.Base(filePath)
@@ -304,17 +311,29 @@ return {current_url:page.url(), url_changed:page.url() !== ` + jsString(beforeUR
 func (c *KernelBrowserClient) execute(ctx context.Context, id types.ApplicationBrowserID, code string, result any) error {
 	sessionID, err := c.sessionID(ctx, id)
 	if err != nil {
-		return err
+		return types.MutationNotExecuted(err)
 	}
 	response, err := c.api.execute(ctx, sessionID, code)
 	if err != nil {
+		var apiErr *kernelsdk.Error
+		if errors.As(err, &apiErr) && apiErr.StatusCode >= 400 && apiErr.StatusCode < 500 &&
+			apiErr.StatusCode != http.StatusRequestTimeout && apiErr.StatusCode != http.StatusTooManyRequests {
+			return types.MutationNotExecuted(safeSDKError("execute Kernel browser operation", err))
+		}
 		return safeSDKError("execute Kernel browser operation", err)
 	}
 	if response == nil {
 		return errors.New("Kernel returned an empty execution response")
 	}
 	if !response.Success {
-		return errors.New("Kernel browser operation failed")
+		err := errors.New("Kernel browser operation failed")
+		if response.Error != "" {
+			err = fmt.Errorf("Kernel browser operation failed: %s", response.Error)
+		}
+		if strings.Contains(response.Error, "element index not found") || strings.Contains(response.Error, "file input index not found") {
+			return types.MutationNotExecuted(err)
+		}
+		return err
 	}
 	if result == nil || response.Result == nil {
 		return nil

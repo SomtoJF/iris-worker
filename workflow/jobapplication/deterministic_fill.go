@@ -43,18 +43,24 @@ func fillDeterministicFields(
 	for _, field := range classified.Fields {
 		switch field.Type {
 		case FieldTypeResume:
+			if field.FileInputIndex == nil {
+				logger.Warn("Resume field has no detected file-input index", "label", field.Label)
+				result.FailedResumeFill = true
+				continue
+			}
+			fileInputIndex := *field.FileInputIndex
 			// Resume upload is critical; if it fails, we need to know
-			logger.Info("Filling resume field", "field_index", field.Index, "label", field.Label)
+			logger.Info("Filling resume field", "file_input_index", fileInputIndex, "label", field.Label)
 
 			err := workflow.ExecuteActivity(ctx, "UploadFile", browseractivity.UploadFileInput{
 				WorkflowID:     workflowID,
 				FilePath:       resumePath,
-				FileInputIndex: field.Index,
-				Target:         nil, // JEV classification doesn't provide Target, will be inferred from index
+				FileInputIndex: fileInputIndex,
+				Target:         nil,
 			}).Get(ctx, nil)
 
 			if err != nil {
-				logger.Error("Failed to upload resume", "field_index", field.Index, "error", err)
+				logger.Error("Failed to upload resume", "file_input_index", fileInputIndex, "error", err)
 				result.FailedResumeFill = true
 				// Continue anyway; planner will handle this
 			} else {

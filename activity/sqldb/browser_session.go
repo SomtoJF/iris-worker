@@ -157,7 +157,8 @@ func (s *BrowserStore) SaveBrowserSession(ctx context.Context, applicationBrowse
 		updates := map[string]any{"provider_session_id": ref.ProviderSessionID,
 			"browser_live_view_url_ciphertext": ref.LiveViewURLCiphertext, "status": ref.Status,
 			"id_browser_profile": ref.IdBrowserProfile, "id_browser_vault": ref.IdBrowserVault,
-			"expires_at": nullableTime(ref.ExpiresAt), "updated_at": time.Now().UTC()}
+			"replay_pending": ref.ReplayPending,
+			"expires_at":     nullableTime(ref.ExpiresAt), "updated_at": time.Now().UTC()}
 		result := tx.Model(&BrowserSession{}).Where("id_browser_session = ?", current.IdBrowserSession).Updates(updates)
 		if result.Error != nil {
 			return fmt.Errorf("save browser session: %w", result.Error)
