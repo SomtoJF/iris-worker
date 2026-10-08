@@ -56,7 +56,7 @@ func fillDeterministicFields(
 				WorkflowID:     workflowID,
 				FilePath:       resumePath,
 				FileInputIndex: fileInputIndex,
-				Target:         nil,
+				Target:         field.Target,
 			}).Get(ctx, nil)
 
 			if err != nil {
@@ -94,7 +94,7 @@ func fillDeterministicFields(
 				ElementIndex: field.Index,
 				Text:         value,
 				Replace:      true,
-				Target:       nil, // JEV classification doesn't provide Target
+				Target:       field.Target,
 			}).Get(ctx, nil)
 
 			if err != nil {

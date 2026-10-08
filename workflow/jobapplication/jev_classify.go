@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/SomtoJF/iris-worker/activity/browser"
+	"github.com/SomtoJF/iris-worker/activity/sqldb"
 	"github.com/SomtoJF/iris-worker/aipi/types"
 	jobapplicationprofile "github.com/SomtoJF/iris-worker/workflow/jobapplication/profile"
 	"go.temporal.io/sdk/temporal"
@@ -26,6 +27,7 @@ const (
 type ClassifiedField struct {
 	Index            int
 	FileInputIndex   *int
+	Target           *sqldb.BrowserMutationTarget
 	Label            string
 	Description      string
 	Type             FieldClassificationType
@@ -219,6 +221,7 @@ func parseClassificationResponse(
 
 		cf := ClassifiedField{
 			Index:       node.Index,
+			Target:      mutationTargetForNode(node),
 			Label:       node.Label,
 			Description: node.Description,
 			Type:        fieldType,
@@ -251,6 +254,7 @@ func parseClassificationResponse(
 		fileInputIndex := node.Index
 		classified = append(classified, ClassifiedField{
 			FileInputIndex: &fileInputIndex,
+			Target:         mutationTargetForFileInput(node),
 			Label:          label,
 			Type:           FieldTypeResume,
 		})

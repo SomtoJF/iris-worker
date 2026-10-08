@@ -17,8 +17,7 @@ var (
 
 // UserPromptData is passed to workflow/jobdiscovery/prompt/user.go.tmpl.
 type UserPromptData struct {
-	Hits      []UserPromptHit
-	TodayDate string
+	Hits []UserPromptHit
 }
 
 // UserPromptHit is one search result block in the user template.
@@ -28,7 +27,6 @@ type UserPromptHit struct {
 	Link           string
 	Snippet        string
 	SourceHostHint string
-	Date           string
 }
 
 func SetTemplates() error {
@@ -75,7 +73,6 @@ func userPromptHitsFromMerged(merged []mergedSearchHit) []UserPromptHit {
 			Link:           m.Link,
 			Snippet:        m.Snippet,
 			SourceHostHint: m.Source,
-			Date:           m.Date,
 		}
 	}
 	return out

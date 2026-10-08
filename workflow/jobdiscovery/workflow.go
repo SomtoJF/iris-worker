@@ -40,6 +40,12 @@ type mergedSearchHit struct {
 	Date    string `json:"date"`
 }
 
+type extractedJob struct {
+	HitIndex    int    `json:"hit_index"`
+	Title       string `json:"title"`
+	CompanyName string `json:"company_name"`
+}
+
 func JobDiscoveryWorkflow(ctx workflow.Context, input JobDiscoveryWorkflowInput) (JobDiscoveryWorkflowOutput, error) {
 	logger := workflow.GetLogger(ctx)
 	logger.Info("JobDiscoveryWorkflow started", "input", input)
@@ -68,6 +74,13 @@ func JobDiscoveryWorkflow(ctx workflow.Context, input JobDiscoveryWorkflowInput)
 	searchOutputs := runBatchWebSearch(ctx, queries, input.Location, input.DateCutoff)
 	now := workflow.Now(ctx)
 	merged := mergeCleanedResults(jobSources, searchOutputs, now)
+	approvedHits, err := filterJobHitsWithJev(ctx, merged, input.IdUser)
+	if err != nil {
+		return JobDiscoveryWorkflowOutput{}, err
+	}
+	if len(approvedHits) == 0 {
+		return JobDiscoveryWorkflowOutput{Jobs: []DiscoveredJob{}}, nil
+	}
 
 	systemPrompt, err := renderJobDiscoverySystemPrompt()
 	if err != nil {
@@ -75,8 +88,7 @@ func JobDiscoveryWorkflow(ctx workflow.Context, input JobDiscoveryWorkflowInput)
 	}
 
 	userPrompt, err := renderJobDiscoveryUserPrompt(UserPromptData{
-		Hits:      userPromptHitsFromMerged(merged),
-		TodayDate: now.Format("2006-01-02"),
+		Hits: userPromptHitsFromMerged(approvedHits),
 	})
 	if err != nil {
 		return JobDiscoveryWorkflowOutput{}, fmt.Errorf("render job discovery user prompt: %w", err)
@@ -107,17 +119,14 @@ func JobDiscoveryWorkflow(ctx workflow.Context, input JobDiscoveryWorkflowInput)
 
 	jsonPayload := stripLLMJSONFences(llmResponse.Content)
 	var parsed struct {
-		Jobs []DiscoveredJob `json:"jobs"`
+		Jobs []extractedJob `json:"jobs"`
 	}
 	if err := json.Unmarshal([]byte(jsonPayload), &parsed); err != nil {
-		return JobDiscoveryWorkflowOutput{}, fmt.Errorf("unmarshal discovered jobs: %w", err)
+		return JobDiscoveryWorkflowOutput{}, fmt.Errorf("unmarshal extracted job fields: %w", err)
 	}
-	if parsed.Jobs == nil {
-		parsed.Jobs = []DiscoveredJob{}
-	}
-	applyDeterministicDates(parsed.Jobs, merged)
+	jobs := postFilterExtractedJobs(parsed.Jobs, approvedHits)
 
-	return JobDiscoveryWorkflowOutput{Jobs: parsed.Jobs}, nil
+	return JobDiscoveryWorkflowOutput{Jobs: jobs}, nil
 }
 
 // stripLLMJSONFences removes markdown code fences (e.g. ```json ... ```) so the
@@ -188,28 +197,24 @@ func discoveredJobsResponseSchema() map[string]interface{} {
 		"properties": map[string]interface{}{
 			"jobs": map[string]interface{}{
 				"type":        "array",
-				"description": "Single job postings only; omit board or multi-job pages.",
+				"description": "Extracted fields associated with supplied hit indices.",
 				"items": map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
+						"hit_index": map[string]interface{}{
+							"type":        "integer",
+							"description": "Index of the supplied hit the extracted fields came from",
+						},
 						"title": map[string]interface{}{
 							"type":        "string",
-							"description": "Job title",
-						},
-						"url": map[string]interface{}{
-							"type":        "string",
-							"description": "Canonical URL for this one job posting",
+							"description": "Job title stated in the supplied hit",
 						},
 						"company_name": map[string]interface{}{
 							"type":        "string",
-							"description": "Employer or brand name hiring for this role; infer from title, snippet, or URL path when not explicit",
-						},
-						"date_posted": map[string]interface{}{
-							"type":        "string",
-							"description": "Copy the hit <date> field (already YYYY-MM-DD or empty)",
+							"description": "Hiring company name stated in or identifiable from the supplied hit; empty if unavailable",
 						},
 					},
-					"required": []string{"title", "url", "company_name", "date_posted"},
+					"required": []string{"hit_index", "title", "company_name"},
 				},
 			},
 		},

@@ -333,6 +333,26 @@ func TestReplaySafetyRequiresSemanticNonSecretTarget(t *testing.T) {
 	}
 }
 
+func TestReplaySafetyRequiresSemanticFileInputTarget(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		target *sqldb.BrowserMutationTarget
+		want   bool
+	}{
+		{name: "identified file input", target: &sqldb.BrowserMutationTarget{Role: "file", Name: "resume"}, want: true},
+		{name: "identified by label", target: &sqldb.BrowserMutationTarget{Role: "FILE", Label: "Resume"}, want: true},
+		{name: "missing identity", target: &sqldb.BrowserMutationTarget{Role: "file"}},
+		{name: "wrong role", target: &sqldb.BrowserMutationTarget{Role: "textbox", Name: "Resume"}},
+		{name: "missing target"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isReplaySafeFileTarget(test.target); got != test.want {
+				t.Fatalf("isReplaySafeFileTarget = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
 func TestReconcileBrowserMutationRecognizesObservableEffects(t *testing.T) {
 	tests := []struct {
 		name       string

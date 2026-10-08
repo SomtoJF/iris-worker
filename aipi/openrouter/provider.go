@@ -235,6 +235,7 @@ func getModelRates(model string) modelRates {
 		"typesafe/jev-1.13":                            {inputRate: 0.042, outputRate: 0.00},
 		"openai/gpt-6-luna-decisions":                  {inputRate: 0.10, outputRate: 0.00},
 		"openai/gpt-5.6-luna":                          {inputRate: 0.20, outputRate: 1.20},
+		"qwen/qwen3.8-flash":                           {inputRate: 0.15, outputRate: 0.47},
 	}
 
 	if rate, ok := rates[model]; ok {

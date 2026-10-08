@@ -421,7 +421,7 @@ func attachMutationTargets(toolName string, arguments map[string]interface{}, no
 	targetForNode := func(index int) *sqldb.BrowserMutationTarget {
 		for _, node := range nodes {
 			if node.Index == index {
-				return &sqldb.BrowserMutationTarget{Role: node.Role, Name: strings.TrimSpace(node.Name), Label: node.Label, Selector: node.Selector, Submit: node.Submit}
+				return mutationTargetForNode(node)
 			}
 		}
 		return nil
@@ -458,14 +458,28 @@ func attachMutationTargets(toolName string, arguments map[string]interface{}, no
 			if fileNode.Index != index {
 				continue
 			}
-			label := ""
-			if fileNode.Label != nil {
-				label = *fileNode.Label
-			}
-			arguments["target"] = &sqldb.BrowserMutationTarget{Role: "file", Name: fileNode.Name, Label: label}
+			arguments["target"] = mutationTargetForFileInput(fileNode)
 			return
 		}
 	}
+}
+
+func mutationTargetForNode(node browseractivity.SerializableTaggedNode) *sqldb.BrowserMutationTarget {
+	return &sqldb.BrowserMutationTarget{
+		Role:     node.Role,
+		Name:     strings.TrimSpace(node.Name),
+		Label:    node.Label,
+		Selector: node.Selector,
+		Submit:   node.Submit,
+	}
+}
+
+func mutationTargetForFileInput(node browseractivity.SerializableTaggedFileInputNode) *sqldb.BrowserMutationTarget {
+	label := ""
+	if node.Label != nil {
+		label = *node.Label
+	}
+	return &sqldb.BrowserMutationTarget{Role: "file", Name: node.Name, Label: label}
 }
 
 const secureUserActionValuePrefix = "__IRIS_SECURE_USER_ACTION_VALUE_"

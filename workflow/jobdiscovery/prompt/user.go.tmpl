@@ -1,12 +1,10 @@
 <job_discovery_user_message>
-  <today_date>{{.TodayDate}}</today_date>
   <search_results>
     {{- range .Hits}}
     <search_result index="{{.Index}}">
       <title>{{.Title}}</title>
       <link>{{.Link}}</link>
       <snippet>{{.Snippet}}</snippet>
-      <date>{{.Date}}</date>
       <source_host_hint>{{.SourceHostHint}}</source_host_hint>
     </search_result>
     {{- end}}

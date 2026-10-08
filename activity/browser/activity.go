@@ -506,6 +506,7 @@ func (a *Activity) UploadFile(ctx context.Context, input UploadFileInput) error 
 	}, sqldb.BrowserMutationContext{
 		FileInputIndex: &input.FileInputIndex,
 		Target:         input.Target,
+		ReplaySafe:     isReplaySafeFileTarget(input.Target),
 	}, "", func() error {
 		return a.client.UploadFile(ctx, applicationBrowserID(input.WorkflowID), input.FileInputIndex, input.FilePath)
 	})
@@ -640,6 +641,10 @@ func isReplaySafeTarget(operation string, target *sqldb.BrowserMutationTarget) b
 		return false
 	}
 	return !looksLikeSubmitTarget(target)
+}
+
+func isReplaySafeFileTarget(target *sqldb.BrowserMutationTarget) bool {
+	return target != nil && strings.EqualFold(target.Role, "file") && (target.Name != "" || target.Label != "")
 }
 
 func isExcludedFromReplay(operation string, target *sqldb.BrowserMutationTarget) bool {

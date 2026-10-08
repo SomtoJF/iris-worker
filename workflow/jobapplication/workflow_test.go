@@ -27,6 +27,8 @@ func TestParseClassificationSeparatesFileInputIndices(t *testing.T) {
 	}, []browser.SerializableTaggedNode{{
 		Index: 0,
 		Label: "Email",
+		Name:  "Email",
+		Role:  "textbox",
 	}}, []browser.SerializableTaggedFileInputNode{{
 		Index: 0,
 		Name:  "resume",
@@ -38,11 +40,14 @@ func TestParseClassificationSeparatesFileInputIndices(t *testing.T) {
 	if len(classified) != 2 {
 		t.Fatalf("classified %d fields, want 2: %+v", len(classified), classified)
 	}
-	if classified[0].Type != FieldTypeStructured || classified[0].Index != 0 || classified[0].FileInputIndex != nil {
+	if classified[0].Type != FieldTypeStructured || classified[0].Index != 0 || classified[0].FileInputIndex != nil ||
+		classified[0].Target == nil || classified[0].Target.Role != "textbox" || classified[0].Target.Name != "Email" {
 		t.Fatalf("interactive field classification = %+v", classified[0])
 	}
 	if classified[1].Type != FieldTypeResume || classified[1].FileInputIndex == nil ||
-		*classified[1].FileInputIndex != 0 || classified[1].Label != "Resume" {
+		*classified[1].FileInputIndex != 0 || classified[1].Label != "Resume" ||
+		classified[1].Target == nil || classified[1].Target.Role != "file" ||
+		classified[1].Target.Name != "resume" || classified[1].Target.Label != "Resume" {
 		t.Fatalf("file input classification = %+v", classified[1])
 	}
 }
