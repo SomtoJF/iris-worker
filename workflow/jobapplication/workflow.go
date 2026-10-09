@@ -324,6 +324,8 @@ func notifyBrowserPoolApplicationSettled(ctx workflow.Context, input JobApplicat
 		return
 	}
 
+	ctx, _ = workflow.NewDisconnectedContext(ctx)
+
 	err := workflow.SignalExternalWorkflow(
 		ctx,
 		input.BrowserPoolWorkflowID,
