@@ -61,6 +61,24 @@ func (p *OpenRouterProvider) GetCompletion(ctx context.Context, req types.AIPIRe
 		chatReq.Temperature = float32(*req.Temperature)
 	}
 
+	if len(req.Tools) > 0 {
+		for _, tool := range req.Tools {
+			chatReq.Tools = append(chatReq.Tools, openrouter.Tool{
+				Type: openrouter.ToolTypeFunction,
+				Function: &openrouter.FunctionDefinition{
+					Name:        tool.Name,
+					Description: tool.Description,
+					Parameters:  tool.Parameters,
+					Strict:      tool.Strict,
+				},
+			})
+		}
+		chatReq.ToolChoice = toolChoice(req.ToolChoice)
+		if req.ParallelToolCalls != nil {
+			chatReq.ParallelToolCalls = *req.ParallelToolCalls
+		}
+	}
+
 	if req.ResponseSchema != nil {
 		var schema json.Marshaler
 		// If ResponseSchema is already a map, wrap it; otherwise generate from struct
@@ -154,6 +172,18 @@ func (p *OpenRouterProvider) GetDecisionsCompletion(ctx context.Context, req typ
 	return response, nil
 }
 
+// toolChoice maps the provider-agnostic value onto the OpenAI-compatible tool_choice parameter.
+func toolChoice(choice string) any {
+	switch choice {
+	case "":
+		return nil
+	case "auto", "none", "required":
+		return choice
+	default:
+		return map[string]any{"type": "function", "function": map[string]string{"name": choice}}
+	}
+}
+
 func buildMessages(req types.AIPIRequest) []openrouter.ChatCompletionMessage {
 	messages := []openrouter.ChatCompletionMessage{}
 
@@ -172,8 +202,12 @@ func buildMessages(req types.AIPIRequest) []openrouter.ChatCompletionMessage {
 
 func mapResponse(resp openrouter.ChatCompletionResponse) types.AIPIResponse {
 	content := ""
+	var toolCalls []types.ToolCall
 	if len(resp.Choices) > 0 {
 		content = resp.Choices[0].Message.Content.Text
+		for _, call := range resp.Choices[0].Message.ToolCalls {
+			toolCalls = append(toolCalls, types.ToolCall{ID: call.ID, Name: call.Function.Name, Arguments: call.Function.Arguments})
+		}
 	}
 
 	inputTokens := 0
@@ -191,6 +225,7 @@ func mapResponse(resp openrouter.ChatCompletionResponse) types.AIPIResponse {
 
 	return types.AIPIResponse{
 		Content:      content,
+		ToolCalls:    toolCalls,
 		InputTokens:  inputTokens,
 		OutputTokens: outputTokens,
 		InputCost:    inputCost,

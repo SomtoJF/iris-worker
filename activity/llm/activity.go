@@ -47,6 +47,9 @@ func (a *Activity) CallLLM(ctx context.Context, req types.AIPIRequest) (types.AI
 	}
 	if len(userActionValues) > 0 {
 		response.Content = redactUserActionValues(response.Content, userActionValues)
+		for i := range response.ToolCalls {
+			response.ToolCalls[i].Arguments = redactUserActionValues(response.ToolCalls[i].Arguments, userActionValues)
+		}
 	}
 	return response, nil
 }

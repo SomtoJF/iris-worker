@@ -17,16 +17,37 @@ type AIPIRequest struct {
 	IdJobApplication           *uint    `json:"id_job_application,omitempty"`
 	UserActionID               string   `json:"user_action_id,omitempty"`
 	UserActionResultCiphertext []byte   `json:"user_action_result_ciphertext,omitempty"`
+	// Tools are exposed through the provider's native function-calling interface.
+	Tools []ToolDefinition `json:"tools,omitempty"`
+	// ToolChoice is "auto", "none", "required", or the name of a specific tool.
+	ToolChoice        string `json:"tool_choice,omitempty"`
+	ParallelToolCalls *bool  `json:"parallel_tool_calls,omitempty"`
+}
+
+// ToolDefinition describes a function the model may call.
+type ToolDefinition struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"`
+	Strict      bool           `json:"strict,omitempty"`
+}
+
+// ToolCall is a function call requested by the model. Arguments is a JSON object string.
+type ToolCall struct {
+	ID        string `json:"id,omitempty"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 type AIPIResponse struct {
-	Content      string  `json:"content"`
-	InputTokens  int     `json:"input_tokens,omitempty"`
-	OutputTokens int     `json:"output_tokens,omitempty"`
-	InputCost    float64 `json:"input_cost,omitempty"`
-	OutputCost   float64 `json:"output_cost,omitempty"`
-	TotalCost    float64 `json:"total_cost,omitempty"`
-	Model        string  `json:"model,omitempty"`
+	Content      string     `json:"content"`
+	ToolCalls    []ToolCall `json:"tool_calls,omitempty"`
+	InputTokens  int        `json:"input_tokens,omitempty"`
+	OutputTokens int        `json:"output_tokens,omitempty"`
+	InputCost    float64    `json:"input_cost,omitempty"`
+	OutputCost   float64    `json:"output_cost,omitempty"`
+	TotalCost    float64    `json:"total_cost,omitempty"`
+	Model        string     `json:"model,omitempty"`
 }
 
 type JevRequest struct {

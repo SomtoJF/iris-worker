@@ -6,7 +6,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"math"
-	"sort"
 	"strconv"
 	"strings"
 	"text/template"
@@ -96,35 +95,35 @@ type ToolItem struct {
 var toolItemMap = map[string]ToolItem{
 	"click": {
 		TemporalString: "Click",
-		Description:    "Click on an element identified by its index",
+		Description:    "Click a button, link, checkbox, radio button, dropdown/combobox trigger or any other clickable element, identified by its tag index. Never click a checkbox/radio/switch that is already checked.",
 	},
 	"input_text": {
 		TemporalString: "Type",
-		Description:    "Type text into an input element identified by its index",
+		Description:    "Type text into a single input field identified by its tag index. Set replace=true to overwrite existing text (e.g. to correct a mistake), false to append or fill an empty field.",
 	},
 	"input_multiple": {
 		TemporalString: "TypeMultiple",
-		Description:    "Type text into multiple input elements in sequence",
+		Description:    "Fill multiple text fields in one action; prefer this over input_text to fill forms faster. Never use it for comboboxes, dropdowns or radio controls.",
 	},
 	"scroll": {
 		TemporalString: "Scroll",
-		Description:    "Scroll the page in a specified direction by a given ratio",
+		Description:    "Scroll the page up or down to reveal content that is not currently visible. direction is \"up\" or \"down\"; ratio is a fraction of the viewport height (0.1 to 1.0, never more than 0.2 at a time).",
 	},
 	"navigate": {
 		TemporalString: "Navigate",
-		Description:    "Navigate to a new URL",
+		Description:    "Navigate the browser to a different URL (complete URL required).",
 	},
 	"web_scrape": {
 		TemporalString: "ScrapeWebPage",
-		Description:    "Scrape the web page for the given URL",
+		Description:    "Extract the text content of a page when needed (other than the job description). Set advanced=true to use the advanced scraper.",
 	},
 	"upload_file": {
 		TemporalString: "UploadFile",
-		Description:    "Upload a file (e.g., resume) to a file input element",
+		Description:    "Upload the candidate's resume to a file input element. file_input_index is the index in the file input elements list (not a tagged node index) and the element must be an input[type=\"file\"]; file_path is the user_resume_path from the prompt.",
 	},
 	"write_cover_letter": {
 		TemporalString: "CoverLetterWorkflow",
-		Description:    "Generate a cover letter for the current job application",
+		Description:    "Generate a cover letter tailored to this candidate and job and type it into the text input or textarea at element_index. Use whenever a manual cover letter entry field is visible; not for file-upload-only fields. Use id_user and id_job_application from the user prompt.",
 		IsWorkflow:     true,
 	},
 	"submit_application": {
@@ -134,7 +133,7 @@ var toolItemMap = map[string]ToolItem{
 	},
 	"handle_user_action": {
 		TemporalString: "HandleUserActionWorkflow",
-		Description:    "Request user intervention for blocking pages",
+		Description:    "Ask the user for input that only they can provide: OTP codes (user_action=USER_ACTION_OTP) or personal facts missing from the candidate profile, resume and job description (user_action=USER_ACTION_ADDITIONAL_INFO; list visible choices in action_details). Never use for motivation, fit or \"why this role/company\" questions. Use id_user and id_job_application from the user prompt.",
 		IsWorkflow:     true,
 	},
 }
@@ -344,13 +343,16 @@ func planNextAction(ctx workflow.Context, input PlannerRequest) (PlannerResponse
 	}
 
 	var temperaturePtr float64 = 0.2
+	parallelToolCalls := false
 
 	llmRequest := types.AIPIRequest{
 		SystemMessage:              systemPrompt,
 		UserMessage:                userPrompt,
 		ImageUrl:                   &screenshotBase64,
 		Model:                      "openai/gpt-5.6-luna",
-		ResponseSchema:             getPlannerResponseSchema(),
+		Tools:                      plannerTools(),
+		ToolChoice:                 "required",
+		ParallelToolCalls:          &parallelToolCalls,
 		Temperature:                &temperaturePtr,
 		IdUser:                     input.IdUser,
 		IdJobApplication:           &input.IdJobApplication,
@@ -363,12 +365,7 @@ func planNextAction(ctx workflow.Context, input PlannerRequest) (PlannerResponse
 		return PlannerResponse{}, err
 	}
 
-	var plannerResponse PlannerResponse
-	if err := json.Unmarshal([]byte(llmResponse.Content), &plannerResponse); err != nil {
-		return PlannerResponse{}, err
-	}
-
-	return plannerResponse, nil
+	return plannerResponseFromToolCalls(llmResponse.ToolCalls)
 }
 
 func executeToolCall(ctx workflow.Context, workflowID string, userID uint, idJobApplication uint, toolCall ToolCall, taggedNodes []browseractivity.SerializableTaggedNode, fileInputNodes []browseractivity.SerializableTaggedFileInputNode, secureActionID string, secureActionCiphertext []byte) ToolCallResult {
@@ -655,33 +652,6 @@ func toolArgumentInt(value interface{}) (int, bool) {
 	}
 }
 
-// plannerToolCallVariants returns one strict schema per tool so that the
-// arguments object is fully specified, as strict structured outputs require.
-func plannerToolCallVariants() []map[string]interface{} {
-	names := make([]string, 0, len(toolRequestStructureMap))
-	for name := range toolRequestStructureMap {
-		if name == "submit_application" {
-			continue // submission is decided and executed by the workflow, not the planner
-		}
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	variants := make([]map[string]interface{}, 0, len(names))
-	for _, name := range names {
-		variants = append(variants, map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"name":      map[string]interface{}{"type": "string", "enum": []string{name}},
-				"arguments": withNoAdditionalProperties(toolRequestStructureMap[name]),
-			},
-			"required":             []string{"name", "arguments"},
-			"additionalProperties": false,
-		})
-	}
-	return variants
-}
-
 // withNoAdditionalProperties deep-copies a schema, setting additionalProperties=false on every object.
 func withNoAdditionalProperties(schema map[string]interface{}) map[string]interface{} {
 	out := make(map[string]interface{}, len(schema)+1)
@@ -709,74 +679,6 @@ func withNoAdditionalProperties(schema map[string]interface{}) map[string]interf
 		out["additionalProperties"] = false
 	}
 	return out
-}
-
-func getPlannerResponseSchema() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"is_application_complete": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Whether the job application has been successfully completed",
-			},
-			"is_application_failed": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Whether the job application has failed and requires human intervention",
-			},
-			"failure_reason": map[string]interface{}{
-				"anyOf": []map[string]interface{}{
-					{"type": "string"},
-					{"type": "null"},
-				},
-				"description": "The reason the job application failed (string or null)",
-			},
-			"failure_status": map[string]interface{}{
-				"anyOf": []map[string]interface{}{
-					{
-						"type": "string",
-						"enum": []string{
-							string(PlannerFailureStatusCaptcha),
-							string(PlannerFailureStatusTruthfulness),
-							string(PlannerFailureStatusLoginRequired),
-							string(PlannerFailureStatusSubmissionError),
-							string(PlannerFailureStatusOther),
-						},
-					},
-					{"type": "null"},
-				},
-				"description": "Categorized failure status when is_application_failed is true; null otherwise",
-			},
-			"tool_call": map[string]interface{}{
-				"anyOf":       append([]map[string]interface{}{{"type": "null"}}, plannerToolCallVariants()...),
-				"description": "The next tool to execute, or null when is_application_complete is true",
-			},
-			"reasoning": map[string]interface{}{
-				"type":        "string",
-				"description": "Brief explanation of the decision and next action",
-			},
-			"questions_answered": map[string]interface{}{
-				"type":        "array",
-				"description": "All application question/answer pairs currently visible as filled in tagged_nodes and required_elements. Only include actual application form questions, not buttons or navigation.",
-				"items": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"question": map[string]interface{}{
-							"type":        "string",
-							"description": "The form field label or question text",
-						},
-						"answer": map[string]interface{}{
-							"type":        "string",
-							"description": "The value filled in the field",
-						},
-					},
-					"required":             []string{"question", "answer"},
-					"additionalProperties": false,
-				},
-			},
-		},
-		"required":             []string{"is_application_complete", "is_application_failed", "failure_reason", "failure_status", "reasoning", "tool_call", "questions_answered"},
-		"additionalProperties": false,
-	}
 }
 
 func getBase64Screenshot(ctx workflow.Context, screenshotPath string) (string, error) {
