@@ -16,10 +16,11 @@ const (
 )
 
 type UserActionLayoutItem struct {
-	Type      *string   `json:"type"`       //e.g password, text, number, phone, email etc.
-	FieldName string    `json:"field_name"` //e.g Username, OTP, Password, etc.
-	Component *string   `json:"component"`  //e.g input, textarea, select, radio, checkbox, etc.
-	Options   *[]string `json:"options"`    //e.g ["Option 1", "Option 2", "Option 3"]
+	Type        *string   `json:"type"`       //e.g password, text, number, phone, email etc.
+	FieldName   string    `json:"field_name"` //e.g Username, OTP, Password, etc.
+	Description *string   `json:"description"`
+	Component   *string   `json:"component"` //e.g input, textarea, select, radio, checkbox, etc.
+	Options     *[]string `json:"options"`   //e.g ["Option 1", "Option 2", "Option 3"]
 }
 
 type UserActionResultItem struct {
@@ -28,6 +29,7 @@ type UserActionResultItem struct {
 }
 
 type UserActionLayout []UserActionLayoutItem
+type UserActionResult []UserActionResultItem
 
 // Scan implements sql.Scanner for JSON stored as TEXT/BLOB in SQLite.
 func (u *UserActionLayout) Scan(value interface{}) error {
@@ -69,19 +71,28 @@ func (u UserActionLayout) Value() (driver.Value, error) {
 }
 
 type UserAction struct {
-	IdUserAction     uint             `gorm:"primaryKey;autoIncrement;column:id_user_action" json:"_"`
-	IdExternal       uuid.UUID        `gorm:"unique;type:uuid;default:gen_random_uuid()" json:"id"`
-	UserId           uint             `gorm:"column:id_user;not null"`
-	User             User             `gorm:"foreignKey:UserId;references:IdUser"`
-	JobApplicationId uint             `gorm:"column:id_job_application;not null"`
-	JobApplication   JobApplication   `gorm:"foreignKey:JobApplicationId;references:IdJobApplication"`
-	UserActionType   UserActionType   `gorm:"type:text;not null"`
-	ActionDetails    string           `gorm:"type:text;not null"`
-	UserActionLayout UserActionLayout `gorm:"type:jsonb;not null"`
-	WorkflowID       string           `gorm:"type:text"`
-	IsPending        bool             `gorm:"default:true"`
-	CreatedAt        time.Time        `gorm:"default:CURRENT_TIMESTAMP"`
-	UpdatedAt        time.Time        `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime"`
+	IdUserAction         uint             `gorm:"primaryKey;autoIncrement;column:id_user_action" json:"_"`
+	IdExternal           uuid.UUID        `gorm:"unique;type:uuid;default:gen_random_uuid()" json:"id"`
+	UserId               uint             `gorm:"column:id_user;not null"`
+	User                 User             `gorm:"foreignKey:UserId;references:IdUser"`
+	JobApplicationId     uint             `gorm:"column:id_job_application;not null"`
+	JobApplication       JobApplication   `gorm:"foreignKey:JobApplicationId;references:IdJobApplication"`
+	UserActionType       UserActionType   `gorm:"type:text;not null"`
+	ActionDetails        string           `gorm:"type:text;not null"`
+	UserActionLayout     UserActionLayout `gorm:"type:jsonb;not null"`
+	WorkflowID           string           `gorm:"type:text"`
+	IsPending            bool             `gorm:"default:true"`
+	DurablePause         bool             `gorm:"not null;default:false"`
+	ApplicationBrowserID uuid.UUID        `gorm:"column:application_browser_id;type:uuid"`
+	ReplayGeneration     uint64           `gorm:"not null;default:0"`
+	CheckpointCreatedAt  *time.Time       `gorm:"column:checkpoint_created_at"`
+	CheckpointMutationID *uint            `gorm:"column:checkpoint_mutation_id"`
+	ResultCiphertext     []byte           `gorm:"column:result_ciphertext;type:bytea"`
+	SubmittedAt          *time.Time       `gorm:"column:submitted_at"`
+	ResumeEnqueuedAt     *time.Time       `gorm:"column:resume_enqueued_at"`
+	ResumeWorkflowID     string           `gorm:"column:resume_workflow_id;type:text"`
+	CreatedAt            time.Time        `gorm:"default:CURRENT_TIMESTAMP"`
+	UpdatedAt            time.Time        `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime"`
 }
 
 func (UserAction) TableName() string {

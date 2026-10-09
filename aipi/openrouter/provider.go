@@ -1,13 +1,22 @@
 package openrouter
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
 
 	"github.com/SomtoJF/iris-worker/aipi/types"
 	"github.com/revrost/go-openrouter"
 	"github.com/revrost/go-openrouter/jsonschema"
+)
+
+const (
+	jevModel          = "typesafe/jev-1.13"
+	decisionsEndpoint = "https://openrouter.ai/api/alpha/decisions"
 )
 
 // rawSchema wraps a map to implement json.Marshaler
@@ -18,11 +27,22 @@ func (r rawSchema) MarshalJSON() ([]byte, error) {
 }
 
 type OpenRouterProvider struct {
-	client *openrouter.Client
+	client        *openrouter.Client
+	apiKey        string
+	jevHTTPClient interface {
+		Do(*http.Request) (*http.Response, error)
+	}
+	decisionsEndpoint string
 }
 
-func NewOpenRouterProvider(client *openrouter.Client) *OpenRouterProvider {
-	return &OpenRouterProvider{client: client}
+func NewOpenRouterProvider(apiKey string) *OpenRouterProvider {
+	openrouterClient := openrouter.NewClient(apiKey)
+	return &OpenRouterProvider{
+		client:            openrouterClient,
+		apiKey:            apiKey,
+		jevHTTPClient:     http.DefaultClient,
+		decisionsEndpoint: decisionsEndpoint,
+	}
 }
 
 func (p *OpenRouterProvider) GetCompletion(ctx context.Context, req types.AIPIRequest) (types.AIPIResponse, error) {
@@ -72,6 +92,56 @@ func (p *OpenRouterProvider) GetCompletion(ctx context.Context, req types.AIPIRe
 	}
 
 	return mapResponse(resp), nil
+}
+
+func (p *OpenRouterProvider) GetJevCompletion(ctx context.Context, req types.JevRequest) (types.JevResponse, error) {
+	requestBody := struct {
+		Model     string                       `json:"model"`
+		State     any                          `json:"state"`
+		Questions map[string]types.JevQuestion `json:"questions"`
+	}{
+		Model:     jevModel,
+		State:     req.State,
+		Questions: req.Questions,
+	}
+	body, err := json.Marshal(requestBody)
+	if err != nil {
+		return types.JevResponse{}, fmt.Errorf("marshal JEV Decisions request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.decisionsEndpoint, bytes.NewReader(body))
+	if err != nil {
+		return types.JevResponse{}, fmt.Errorf("create JEV Decisions request: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "application/json")
+
+	httpResp, err := p.jevHTTPClient.Do(httpReq)
+	if err != nil {
+		return types.JevResponse{}, fmt.Errorf("send JEV Decisions request: %w", err)
+	}
+	defer httpResp.Body.Close()
+
+	responseBody, err := io.ReadAll(io.LimitReader(httpResp.Body, 1<<20))
+	if err != nil {
+		return types.JevResponse{}, fmt.Errorf("read JEV Decisions response: %w", err)
+	}
+	if httpResp.StatusCode < http.StatusOK || httpResp.StatusCode >= http.StatusMultipleChoices {
+		return types.JevResponse{}, fmt.Errorf("JEV Decisions API returned %s: %s", httpResp.Status, strings.TrimSpace(string(responseBody)))
+	}
+
+	var response types.JevResponse
+	if err := json.Unmarshal(responseBody, &response); err != nil {
+		return types.JevResponse{}, fmt.Errorf("decode JEV Decisions response: %w", err)
+	}
+	if response.Model == "" {
+		return types.JevResponse{}, fmt.Errorf("JEV Decisions response missing model")
+	}
+	if response.Answers == nil {
+		return types.JevResponse{}, fmt.Errorf("JEV Decisions response missing answers")
+	}
+	return response, nil
 }
 
 func buildMessages(req types.AIPIRequest) []openrouter.ChatCompletionMessage {
@@ -163,6 +233,9 @@ func getModelRates(model string) modelRates {
 		"google/gemma-4-31b-it:free":                   {inputRate: 0.00, outputRate: 0.00},
 		"google/gemma-4-31b-it":                        {inputRate: 0.12, outputRate: 0.35},
 		"typesafe/jev-1.13":                            {inputRate: 0.042, outputRate: 0.00},
+		"openai/gpt-6-luna-decisions":                  {inputRate: 0.10, outputRate: 0.00},
+		"openai/gpt-5.6-luna":                          {inputRate: 0.20, outputRate: 1.20},
+		"qwen/qwen3.8-flash":                           {inputRate: 0.15, outputRate: 0.47},
 	}
 
 	if rate, ok := rates[model]; ok {

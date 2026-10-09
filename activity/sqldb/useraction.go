@@ -2,85 +2,13 @@ package sqldb
 
 import (
 	"context"
-	"database/sql/driver"
-	"encoding/json"
-	"time"
+	"fmt"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // ====== TYPES ======
-
-type UserActionLayoutItem struct {
-	Type        *string   `json:"type"`
-	FieldName   string    `json:"field_name"`
-	Description *string   `json:"description"`
-	Component   *string   `json:"component"`
-	Options     *[]string `json:"options"`
-}
-
-type UserActionResultItem struct {
-	FieldName string `json:"field_name"`
-	Value     string `json:"value"`
-}
-
-type UserActionLayout []UserActionLayoutItem
-type UserActionResult []UserActionResultItem
-
-func (u *UserActionLayout) Scan(value interface{}) error {
-	if value == nil {
-		*u = UserActionLayout{}
-		return nil
-	}
-	var b []byte
-	switch v := value.(type) {
-	case []byte:
-		b = v
-	case string:
-		b = []byte(v)
-	default:
-		*u = UserActionLayout{}
-		return nil
-	}
-	if len(b) == 0 || (len(b) == 4 && (string(b) == "NULL" || string(b) == "null")) {
-		*u = UserActionLayout{}
-		return nil
-	}
-	if err := json.Unmarshal(b, (*[]UserActionLayoutItem)(u)); err != nil {
-		*u = UserActionLayout{}
-		return nil
-	}
-	return nil
-}
-
-func (u UserActionLayout) Value() (driver.Value, error) {
-	if len(u) == 0 {
-		return "[]", nil
-	}
-	return json.Marshal(u)
-}
-
-// ====== MODEL ======
-
-type UserAction struct {
-	IdUserAction     uint             `gorm:"primaryKey;autoIncrement;column:id_user_action" json:"_"`
-	IdExternal       uuid.UUID        `gorm:"unique;type:uuid;default:gen_random_uuid()" json:"id"`
-	UserId           uint             `gorm:"column:id_user;not null"`
-	User             User             `gorm:"foreignKey:UserId;references:IdUser"`
-	JobApplicationId uint             `gorm:"column:id_job_application;not null"`
-	JobApplication   JobApplication   `gorm:"foreignKey:JobApplicationId;references:IdJobApplication"`
-	UserActionType   string           `gorm:"type:text;not null"`
-	ActionDetails    string           `gorm:"type:text;not null"`
-	UserActionLayout UserActionLayout `gorm:"type:jsonb;not null"`
-	WorkflowID       string           `gorm:"type:text"`
-	IsPending        bool             `gorm:"default:true"`
-	CreatedAt        time.Time        `gorm:"default:CURRENT_TIMESTAMP"`
-	UpdatedAt        time.Time        `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime"`
-}
-
-func (UserAction) TableName() string {
-	return "user_action"
-}
 
 // ====== ACTIVITIES ======
 
@@ -98,7 +26,7 @@ func (a *Activity) CreateUserAction(ctx context.Context, input CreateUserActionI
 		WorkflowID:       input.WorkflowID,
 		UserId:           input.UserId,
 		JobApplicationId: input.JobApplicationId,
-		UserActionType:   input.UserActionType,
+		UserActionType:   UserActionType(input.UserActionType),
 		ActionDetails:    input.ActionDetails,
 		UserActionLayout: input.Layout,
 		IsPending:        true,
@@ -107,6 +35,123 @@ func (a *Activity) CreateUserAction(ctx context.Context, input CreateUserActionI
 		return UserAction{}, err
 	}
 	return record, nil
+}
+
+type CreateDurableUserActionInput struct {
+	CreateUserActionInput
+	ApplicationBrowserID string `json:"application_browser_id"`
+}
+
+func (a *Activity) CreateDurableUserAction(ctx context.Context, input CreateDurableUserActionInput) (UserAction, error) {
+	browserID, err := uuid.Parse(input.ApplicationBrowserID)
+	if err != nil || browserID == uuid.Nil {
+		return UserAction{}, fmt.Errorf("create user action requires a valid application browser ID")
+	}
+	var session BrowserSession
+	if err := a.db.WithContext(ctx).Where("application_browser_id = ?", browserID).First(&session).Error; err != nil {
+		return UserAction{}, fmt.Errorf("load browser session for user action: %w", err)
+	}
+	if session.Provider == BrowserProviderKernel {
+		store := NewBrowserStore(a.db)
+		cursor, found, err := store.LatestBrowserMutationCursor(ctx, browserID, session.ReplayGeneration)
+		if err != nil {
+			return UserAction{}, fmt.Errorf("load user-action mutation cursor: %w", err)
+		}
+		if found {
+			if err := store.SetPendingBrowserCheckpoint(ctx, browserID, cursor.CreatedAt, cursor.MutationID); err != nil {
+				return UserAction{}, fmt.Errorf("set pending user-action checkpoint: %w", err)
+			}
+		}
+	}
+	record := UserAction{
+		WorkflowID:           input.WorkflowID,
+		ApplicationBrowserID: browserID,
+		ReplayGeneration:     session.ReplayGeneration,
+		CheckpointCreatedAt:  session.CheckpointCreatedAt,
+		CheckpointMutationID: session.CheckpointMutationID,
+		UserId:               input.UserId,
+		JobApplicationId:     input.JobApplicationId,
+		UserActionType:       UserActionType(input.UserActionType),
+		ActionDetails:        input.ActionDetails,
+		UserActionLayout:     input.Layout,
+		IsPending:            true,
+		DurablePause:         true,
+	}
+	if err := a.db.WithContext(ctx).Create(&record).Error; err != nil {
+		return UserAction{}, err
+	}
+	return record, nil
+}
+
+type CommitUserActionCheckpointInput struct {
+	IdUserAction uint `json:"id_user_action"`
+}
+
+func (a *Activity) CommitUserActionCheckpoint(ctx context.Context, input CommitUserActionCheckpointInput) error {
+	if input.IdUserAction == 0 {
+		return fmt.Errorf("user action ID is required")
+	}
+	return a.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var action UserAction
+		if err := tx.Where("id_user_action = ? AND durable_pause = ?", input.IdUserAction, true).First(&action).Error; err != nil {
+			return fmt.Errorf("load durable user action checkpoint: %w", err)
+		}
+		if action.ApplicationBrowserID == uuid.Nil {
+			return fmt.Errorf("durable user action has no application browser ID")
+		}
+		var session BrowserSession
+		if err := tx.Where("application_browser_id = ?", action.ApplicationBrowserID).First(&session).Error; err != nil {
+			return fmt.Errorf("load closed browser session for user action: %w", err)
+		}
+		if session.Status != BrowserSessionClosed {
+			return fmt.Errorf("browser session must be closed before committing user-action checkpoint")
+		}
+		if session.PendingCheckpointCreatedAt != nil || session.PendingCheckpointMutationID != nil {
+			return fmt.Errorf("browser session has an uncommitted user-action checkpoint")
+		}
+		return tx.Model(&UserAction{}).Where("id_user_action = ?", input.IdUserAction).Updates(map[string]any{
+			"checkpoint_created_at":  session.CheckpointCreatedAt,
+			"checkpoint_mutation_id": session.CheckpointMutationID,
+		}).Error
+	})
+}
+
+type SubmittedUserActionInput struct {
+	IdUserAction uint `json:"id_user_action"`
+}
+
+type SubmittedUserAction struct {
+	IdExternal uuid.UUID `json:"id_external"`
+	Ciphertext []byte    `json:"ciphertext"`
+}
+
+func (a *Activity) GetSubmittedUserAction(ctx context.Context, input SubmittedUserActionInput) (SubmittedUserAction, error) {
+	var action UserAction
+	if err := a.db.WithContext(ctx).Where("id_user_action = ? AND submitted_at IS NOT NULL", input.IdUserAction).First(&action).Error; err != nil {
+		return SubmittedUserAction{}, err
+	}
+	if len(action.ResultCiphertext) == 0 {
+		return SubmittedUserAction{}, fmt.Errorf("submitted user action has no protected result")
+	}
+	if action.ApplicationBrowserID == uuid.Nil || action.ReplayGeneration == 0 {
+		return SubmittedUserAction{}, fmt.Errorf("submitted user action has no browser replay checkpoint")
+	}
+	var session BrowserSession
+	if err := a.db.WithContext(ctx).Where("application_browser_id = ?", action.ApplicationBrowserID).First(&session).Error; err != nil {
+		return SubmittedUserAction{}, fmt.Errorf("load browser session for user action resume: %w", err)
+	}
+	if session.ReplayGeneration != action.ReplayGeneration {
+		return SubmittedUserAction{}, fmt.Errorf("user action replay generation no longer matches browser session")
+	}
+	return SubmittedUserAction{IdExternal: action.IdExternal, Ciphertext: append([]byte(nil), action.ResultCiphertext...)}, nil
+}
+
+func DecryptUserActionResult(ciphertext []byte, actionID uuid.UUID) (string, error) {
+	return decryptBrowserSecret(ciphertext, actionID)
+}
+
+func EncryptUserActionResult(plaintext string, actionID uuid.UUID) ([]byte, error) {
+	return encryptBrowserSecret(plaintext, actionID)
 }
 
 type UpdateUserActionInput struct {

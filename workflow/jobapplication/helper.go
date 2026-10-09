@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -12,7 +14,6 @@ import (
 	s3activity "github.com/SomtoJF/iris-worker/activity/s3"
 	"github.com/SomtoJF/iris-worker/activity/sqldb"
 	"github.com/SomtoJF/iris-worker/aipi/types"
-	"github.com/SomtoJF/iris-worker/browserfactory"
 	"github.com/SomtoJF/iris-worker/helper"
 	"github.com/SomtoJF/iris-worker/shared"
 	enumspb "go.temporal.io/api/enums/v1"
@@ -25,8 +26,7 @@ type TemplateSet struct {
 }
 
 type WorkflowTemplates struct {
-	Planner  TemplateSet
-	Autofill TemplateSet
+	Planner TemplateSet
 }
 
 var Templates WorkflowTemplates
@@ -69,19 +69,21 @@ type PlannerResponse struct {
 }
 
 type PlannerRequest struct {
-	IdUser                  uint                                             `json:"id_user"`
-	IdJobApplication        uint                                             `json:"id_job_application"`
-	JobPostingUrl           string                                           `json:"job_posting_url"`
-	JobDescription          string                                           `json:"job_description"`
-	UserResume              string                                           `json:"user_resume"`
-	UserResumePath          string                                           `json:"user_resume_path"`
-	ScreenshotPath          string                                           `json:"screenshot_path"`
-	TaggedNodes             []browserfactory.SerializableTaggedNode          `json:"tagged_nodes"`
-	RequiredFields          []browserfactory.SerializableTaggedNode          `json:"required_fields"`
-	TaggedFileInputElements []browserfactory.SerializableTaggedFileInputNode `json:"tagged_file_input_elements"`
-	ToolCallHistory         []ToolCallResult                                 `json:"tool_call_history"`
-	UserProfileJSON         string                                           `json:"user_profile"`
-	CurrentDate             string                                           `json:"current_date"`
+	IdUser                     uint                                              `json:"id_user"`
+	IdJobApplication           uint                                              `json:"id_job_application"`
+	JobPostingUrl              string                                            `json:"job_posting_url"`
+	JobDescription             string                                            `json:"job_description"`
+	UserResume                 string                                            `json:"user_resume"`
+	UserResumePath             string                                            `json:"user_resume_path"`
+	ScreenshotPath             string                                            `json:"screenshot_path"`
+	TaggedNodes                []browseractivity.SerializableTaggedNode          `json:"tagged_nodes"`
+	RequiredFields             []browseractivity.SerializableTaggedNode          `json:"required_fields"`
+	TaggedFileInputElements    []browseractivity.SerializableTaggedFileInputNode `json:"tagged_file_input_elements"`
+	ToolCallHistory            []ToolCallResult                                  `json:"tool_call_history"`
+	UserProfileJSON            string                                            `json:"user_profile"`
+	CurrentDate                string                                            `json:"current_date"`
+	UserActionID               string                                            `json:"user_action_id,omitempty"`
+	UserActionResultCiphertext []byte                                            `json:"user_action_result_ciphertext,omitempty"`
 }
 
 type ToolItem struct {
@@ -320,14 +322,6 @@ func SetTemplates() {
 	if err != nil {
 		panic(err)
 	}
-	Templates.Autofill.System, err = helper.LoadTemplate("workflow/jobapplication/prompt/autofill/system.go.tmpl")
-	if err != nil {
-		panic(err)
-	}
-	Templates.Autofill.User, err = helper.LoadTemplate("workflow/jobapplication/prompt/autofill/user.go.tmpl")
-	if err != nil {
-		panic(err)
-	}
 }
 
 func planNextAction(ctx workflow.Context, input PlannerRequest) (PlannerResponse, error) {
@@ -351,14 +345,16 @@ func planNextAction(ctx workflow.Context, input PlannerRequest) (PlannerResponse
 	var temperaturePtr float64 = 0.2
 
 	llmRequest := types.AIPIRequest{
-		SystemMessage:    systemPrompt,
-		UserMessage:      userPrompt,
-		ImageUrl:         &screenshotBase64,
-		Model:            "x-ai/grok-4.3",
-		ResponseSchema:   getPlannerResponseSchema(),
-		Temperature:      &temperaturePtr,
-		IdUser:           input.IdUser,
-		IdJobApplication: &input.IdJobApplication,
+		SystemMessage:              systemPrompt,
+		UserMessage:                userPrompt,
+		ImageUrl:                   &screenshotBase64,
+		Model:                      "openai/gpt-5.6-luna",
+		ResponseSchema:             getPlannerResponseSchema(),
+		Temperature:                &temperaturePtr,
+		IdUser:                     input.IdUser,
+		IdJobApplication:           &input.IdJobApplication,
+		UserActionID:               input.UserActionID,
+		UserActionResultCiphertext: input.UserActionResultCiphertext,
 	}
 
 	var llmResponse types.AIPIResponse
@@ -374,7 +370,7 @@ func planNextAction(ctx workflow.Context, input PlannerRequest) (PlannerResponse
 	return plannerResponse, nil
 }
 
-func executeToolCall(ctx workflow.Context, workflowID string, userID uint, idJobApplication uint, toolCall ToolCall) ToolCallResult {
+func executeToolCall(ctx workflow.Context, workflowID string, userID uint, idJobApplication uint, toolCall ToolCall, taggedNodes []browseractivity.SerializableTaggedNode, fileInputNodes []browseractivity.SerializableTaggedFileInputNode, secureActionID string, secureActionCiphertext []byte) ToolCallResult {
 	toolItem, exists := toolItemMap[toolCall.Name]
 	if !exists {
 		return ToolCallResult{
@@ -382,10 +378,23 @@ func executeToolCall(ctx workflow.Context, workflowID string, userID uint, idJob
 			Error:    fmt.Errorf("unknown tool: %s", toolCall.Name),
 		}
 	}
-
+	if toolCall.Arguments == nil {
+		toolCall.Arguments = make(map[string]interface{})
+	}
 	toolCall.Arguments["workflow_id"] = workflowID
 	toolCall.Arguments["user_id"] = userID
 	toolCall.Arguments["id_job_application"] = idJobApplication
+	attachMutationTargets(toolCall.Name, toolCall.Arguments, taggedNodes, fileInputNodes)
+	if toolCall.Name == "input_text" {
+		if result, handled := executeSecureTextTool(ctx, workflowID, toolCall, secureActionID, secureActionCiphertext); handled {
+			return result
+		}
+	}
+	if toolCall.Name == "input_multiple" {
+		if result, handled := executeSecureMultipleTool(ctx, workflowID, toolCall, secureActionID, secureActionCiphertext); handled {
+			return result
+		}
+	}
 	resp := make(map[string]interface{})
 	var err error
 	if toolItem.IsWorkflow {
@@ -402,10 +411,211 @@ func executeToolCall(ctx workflow.Context, workflowID string, userID uint, idJob
 			Error:    err,
 		}
 	}
-
 	return ToolCallResult{
 		ToolCall: toolCall,
 		Result:   resp,
+	}
+}
+
+func attachMutationTargets(toolName string, arguments map[string]interface{}, nodes []browseractivity.SerializableTaggedNode, fileNodes []browseractivity.SerializableTaggedFileInputNode) {
+	targetForNode := func(index int) *sqldb.BrowserMutationTarget {
+		for _, node := range nodes {
+			if node.Index == index {
+				return mutationTargetForNode(node)
+			}
+		}
+		return nil
+	}
+	switch toolName {
+	case "click", "input_text":
+		if index, ok := toolArgumentInt(arguments["element_index"]); ok {
+			if target := targetForNode(index); target != nil {
+				arguments["target"] = target
+			}
+		}
+	case "input_multiple":
+		fields, ok := arguments["fields"].([]interface{})
+		if !ok {
+			return
+		}
+		for _, rawField := range fields {
+			field, ok := rawField.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if index, ok := toolArgumentInt(field["element_index"]); ok {
+				if target := targetForNode(index); target != nil {
+					field["target"] = target
+				}
+			}
+		}
+	case "upload_file":
+		index, ok := toolArgumentInt(arguments["file_input_index"])
+		if !ok {
+			return
+		}
+		for _, fileNode := range fileNodes {
+			if fileNode.Index != index {
+				continue
+			}
+			arguments["target"] = mutationTargetForFileInput(fileNode)
+			return
+		}
+	}
+}
+
+func mutationTargetForNode(node browseractivity.SerializableTaggedNode) *sqldb.BrowserMutationTarget {
+	return &sqldb.BrowserMutationTarget{
+		Role:     node.Role,
+		Name:     strings.TrimSpace(node.Name),
+		Label:    node.Label,
+		Selector: node.Selector,
+		Submit:   node.Submit,
+	}
+}
+
+func mutationTargetForFileInput(node browseractivity.SerializableTaggedFileInputNode) *sqldb.BrowserMutationTarget {
+	label := ""
+	if node.Label != nil {
+		label = *node.Label
+	}
+	return &sqldb.BrowserMutationTarget{Role: "file", Name: node.Name, Label: label}
+}
+
+const secureUserActionValuePrefix = "__IRIS_SECURE_USER_ACTION_VALUE_"
+
+func executeSecureTextTool(ctx workflow.Context, workflowID string, toolCall ToolCall, actionID string, ciphertext []byte) (ToolCallResult, bool) {
+	text, ok := toolCall.Arguments["text"].(string)
+	if !ok || !strings.Contains(text, secureUserActionValuePrefix) {
+		return ToolCallResult{}, false
+	}
+	valueIndex, ok := secureUserActionValueIndex(text)
+	if !ok || actionID == "" || len(ciphertext) == 0 {
+		return ToolCallResult{ToolCall: toolCall, Error: fmt.Errorf("secure user-action answer marker is invalid or unavailable")}, true
+	}
+	elementIndex, ok := toolArgumentInt(toolCall.Arguments["element_index"])
+	if !ok {
+		return ToolCallResult{ToolCall: toolCall, Error: fmt.Errorf("secure user-action input has an invalid element index")}, true
+	}
+	err := workflow.ExecuteActivity(ctx, "TypeUserActionSecure", browseractivity.SecureTypeInput{
+		ActionID:     actionID,
+		Operation:    "user_action_value",
+		Ciphertext:   ciphertext,
+		WorkflowID:   workflowID,
+		ElementIndex: elementIndex,
+		ValueIndex:   valueIndex,
+		Target:       targetFromArgument(toolCall.Arguments["target"]),
+	}).Get(ctx, nil)
+	return ToolCallResult{ToolCall: toolCall, Error: err}, true
+}
+
+func executeSecureMultipleTool(ctx workflow.Context, workflowID string, toolCall ToolCall, actionID string, ciphertext []byte) (ToolCallResult, bool) {
+	fields, ok := toolCall.Arguments["fields"].([]interface{})
+	if !ok {
+		return ToolCallResult{}, false
+	}
+	hasSecureValue := false
+	for _, rawField := range fields {
+		field, ok := rawField.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		text, _ := field["text"].(string)
+		if strings.Contains(text, secureUserActionValuePrefix) {
+			hasSecureValue = true
+			break
+		}
+	}
+	if !hasSecureValue {
+		return ToolCallResult{}, false
+	}
+	if actionID == "" || len(ciphertext) == 0 {
+		return ToolCallResult{ToolCall: toolCall, Error: fmt.Errorf("secure user-action answer is unavailable")}, true
+	}
+	for _, rawField := range fields {
+		field, ok := rawField.(map[string]interface{})
+		if !ok {
+			return ToolCallResult{ToolCall: toolCall, Error: fmt.Errorf("input_multiple contains an invalid field")}, true
+		}
+		text, _ := field["text"].(string)
+		elementIndex, ok := toolArgumentInt(field["element_index"])
+		if !ok {
+			return ToolCallResult{ToolCall: toolCall, Error: fmt.Errorf("input_multiple contains an invalid element index")}, true
+		}
+		if strings.Contains(text, secureUserActionValuePrefix) {
+			valueIndex, valid := secureUserActionValueIndex(text)
+			if !valid {
+				return ToolCallResult{ToolCall: toolCall, Error: fmt.Errorf("secure user-action answer marker is invalid")}, true
+			}
+			if err := workflow.ExecuteActivity(ctx, "TypeUserActionSecure", browseractivity.SecureTypeInput{
+				ActionID:     actionID,
+				Operation:    "user_action_value",
+				Ciphertext:   ciphertext,
+				WorkflowID:   workflowID,
+				ElementIndex: elementIndex,
+				ValueIndex:   valueIndex,
+				Target:       targetFromArgument(field["target"]),
+			}).Get(ctx, nil); err != nil {
+				return ToolCallResult{ToolCall: toolCall, Error: err}, true
+			}
+			continue
+		}
+		if err := workflow.ExecuteActivity(ctx, "Type", browseractivity.TypeInput{
+			WorkflowID:   workflowID,
+			ElementIndex: elementIndex,
+			Text:         text,
+			Replace:      true,
+			Target:       targetFromArgument(field["target"]),
+		}).Get(ctx, nil); err != nil {
+			return ToolCallResult{ToolCall: toolCall, Error: err}, true
+		}
+	}
+	return ToolCallResult{ToolCall: toolCall, Result: map[string]interface{}{}}, true
+}
+
+func targetFromArgument(value interface{}) *sqldb.BrowserMutationTarget {
+	switch target := value.(type) {
+	case *sqldb.BrowserMutationTarget:
+		return target
+	case sqldb.BrowserMutationTarget:
+		return &target
+	case map[string]interface{}:
+		out := &sqldb.BrowserMutationTarget{}
+		out.Role, _ = target["role"].(string)
+		out.Name, _ = target["name"].(string)
+		out.Label, _ = target["label"].(string)
+		out.Selector, _ = target["selector"].(string)
+		out.Submit, _ = target["submit"].(bool)
+		if out.Role == "" && out.Name == "" && out.Label == "" && out.Selector == "" && !out.Submit {
+			return nil
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func secureUserActionValueIndex(text string) (int, bool) {
+	const suffix = "__"
+	if !strings.HasPrefix(text, secureUserActionValuePrefix) || !strings.HasSuffix(text, suffix) {
+		return 0, false
+	}
+	raw := strings.TrimSuffix(strings.TrimPrefix(text, secureUserActionValuePrefix), suffix)
+	index, err := strconv.Atoi(raw)
+	return index, err == nil && index >= 0
+}
+
+func toolArgumentInt(value interface{}) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, typed >= 0
+	case int64:
+		return int(typed), typed >= 0
+	case float64:
+		index := int(typed)
+		return index, typed >= 0 && float64(index) == typed
+	default:
+		return 0, false
 	}
 }
 
@@ -506,136 +716,6 @@ func getBase64Screenshot(ctx workflow.Context, screenshotPath string) (string, e
 	return screenshotBase64, nil
 }
 
-type JobDetails struct {
-	JobTitle          string `json:"job_title"`
-	CompanyName       string `json:"company_name"`
-	JobDescription    string `json:"job_description"`
-	IsValidJobPosting bool   `json:"is_valid_job_posting"`
-}
-
-func retrieveJobDetails(ctx workflow.Context, workflowID string, url string, idUser uint, idJobApplication uint) (JobDetails, error) {
-	pageText, err := scrapeJobPageText(ctx, workflowID, url, idUser, idJobApplication)
-	if err != nil {
-		return JobDetails{}, err
-	}
-	return extractJobDetailsFromText(ctx, pageText, idUser, idJobApplication)
-}
-
-func extractJobDetailsFromText(ctx workflow.Context, pageText string, idUser uint, idJobApplication uint) (JobDetails, error) {
-	systemPrompt := "Extract the job title, company name, and job description from the provided scraped webpage content. Return the data in JSON format. Most job descriptions have a 'Who we are' or 'About us' or 'Company Description' section that contains the company's details. This is where you should look for the company name. The job description should be returned in its entirety and formatted in markdown. If this page doesn't include the job description, It is invalid and you should set is_valid_job_posting to false. For invalid job postings, return an empty string for the job description, job title, and company name."
-	userPrompt := fmt.Sprintf("Scraped content:\n\n%s", pageText)
-
-	llmRequest := types.AIPIRequest{
-		SystemMessage:    systemPrompt,
-		UserMessage:      userPrompt,
-		Model:            "deepseek/deepseek-v4-flash",
-		ResponseSchema:   getJobDetailsResponseSchema(),
-		IdUser:           idUser,
-		IdJobApplication: &idJobApplication,
-	}
-
-	var llmResponse types.AIPIResponse
-	if err := workflow.ExecuteActivity(ctx, "CallLLM", llmRequest).Get(ctx, &llmResponse); err != nil {
-		return JobDetails{}, err
-	}
-
-	jsonPayload := stripLLMJSONFences(llmResponse.Content)
-
-	var jobDetails JobDetails
-	if err := json.Unmarshal([]byte(jsonPayload), &jobDetails); err != nil {
-		return JobDetails{}, fmt.Errorf("unmarshal job details from %q: %w", truncateForErr(jsonPayload, 120), err)
-	}
-
-	return jobDetails, nil
-}
-
-// scrapeJobPageText returns the job page text, falling back through the scrape
-// pipeline: ScrapeWebPage (Serper → Colly) first, then the rod-rendered page the
-// workflow already opened. The rod fallback covers client-side SPAs (Ashby, Lever,
-// Workable) that Colly can't render and transient Serper 5xx outages, both of which
-// otherwise fail the whole application at step one.
-func scrapeJobPageText(ctx workflow.Context, workflowID string, url string, idUser uint, idJobApplication uint) (string, error) {
-	logger := workflow.GetLogger(ctx)
-
-	var scrapeOutput map[string]interface{}
-	err := workflow.ExecuteActivity(ctx, "ScrapeWebPage", map[string]interface{}{
-		"url":                url,
-		"advanced":           true,
-		"id_user":            idUser,
-		"id_job_application": idJobApplication,
-	}).Get(ctx, &scrapeOutput)
-	if err == nil {
-		if pageText, ok := scrapeOutput["data"].(string); ok && strings.TrimSpace(pageText) != "" {
-			return pageText, nil
-		}
-		logger.Warn("ScrapeWebPage returned empty data, falling back to rod-rendered page")
-	} else {
-		logger.Warn("ScrapeWebPage failed, falling back to rod-rendered page", "error", err)
-	}
-
-	var rendered browseractivity.ScrapeRenderedPageOutput
-	if err := workflow.ExecuteActivity(ctx, "ScrapeRenderedPage", browseractivity.ScrapeRenderedPageInput{
-		WorkflowID: workflowID,
-	}).Get(ctx, &rendered); err != nil {
-		return "", fmt.Errorf("failed to get scraped data (serper/colly empty, rod fallback failed: %w)", err)
-	}
-	if strings.TrimSpace(rendered.Data) == "" {
-		return "", fmt.Errorf("failed to get scraped data")
-	}
-	return rendered.Data, nil
-}
-
-func truncateForErr(s string, n int) string {
-	s = strings.TrimSpace(s)
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
-}
-
-// stripLLMJSONFences removes markdown code fences (e.g. ```json ... ```) so the
-// string can be passed to json.Unmarshal. If there are no fences, content is
-// returned trimmed unchanged.
-func stripLLMJSONFences(content string) string {
-	s := strings.TrimSpace(content)
-	if !strings.HasPrefix(s, "```") {
-		return s
-	}
-	s = strings.TrimSpace(strings.TrimPrefix(s, "```"))
-	if len(s) >= 4 && strings.EqualFold(s[:4], "json") {
-		s = strings.TrimSpace(s[4:])
-	}
-	if i := strings.LastIndex(s, "```"); i >= 0 {
-		s = strings.TrimSpace(s[:i])
-	}
-	return strings.TrimSpace(s)
-}
-
-func getJobDetailsResponseSchema() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"job_title": map[string]interface{}{
-				"type":        "string",
-				"description": "The title of the job position",
-			},
-			"company_name": map[string]interface{}{
-				"type":        "string",
-				"description": "The name of the company posting the job",
-			},
-			"job_description": map[string]interface{}{
-				"type":        "string",
-				"description": "The full job description including responsibilities, requirements, and qualifications",
-			},
-			"is_valid_job_posting": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Whether the job posting is valid and contains the necessary information",
-			},
-		},
-		"required": []string{"job_title", "company_name", "job_description", "is_valid_job_posting"},
-	}
-}
-
 func loadResumeIntoMemory(ctx workflow.Context, filename string, fileKey string) (string, error) {
 	var output s3activity.DownloadFileOutput
 	if err := workflow.ExecuteActivity(ctx, "DownloadFile", s3activity.DownloadFileInput{
@@ -650,76 +730,162 @@ func loadResumeIntoMemory(ctx workflow.Context, filename string, fileKey string)
 }
 
 func deduplicateQA(ctx workflow.Context, idUser uint, idJobApplication uint, questions []sqldb.JobApplicationQuestion) ([]sqldb.JobApplicationQuestion, error) {
-	questionsJSON, err := json.Marshal(questions)
-	if err != nil {
-		return nil, fmt.Errorf("marshal questions: %w", err)
+	if len(questions) < 2 {
+		return append([]sqldb.JobApplicationQuestion(nil), questions...), nil
 	}
 
-	llmRequest := types.AIPIRequest{
-		SystemMessage: "You are cleaning up job application form Q&A pairs.\n\nTask: Deduplicate the list by merging ONLY entries that clearly refer to the exact same underlying question but use different wording (label drift).\n\nHard rules:\n- Be conservative: if you are not confident two questions are the same, DO NOT merge.\n- Never merge questions that differ in intent (e.g. \"Phone\" vs \"Mobile phone\", \"Location\" vs \"Willing to relocate\", \"Work authorization\" vs \"Visa sponsorship\").\n- Never invent new answers or modify answers.\n- Prefer keeping separate entries over incorrect merges.\n\nWhen you do merge:\n- Keep the most descriptive/clear question text.\n- If the answers are identical (ignoring case/whitespace), keep one.\n- If answers differ, only choose one if you can justify they are the same value in different formatting (e.g. \"Yes\" vs \"yes\", phone formatting). Otherwise keep BOTH as separate entries.\n\nReturn ONLY valid JSON matching the schema.",
-		UserMessage:   string(questionsJSON),
-		// Free/small models ignore strict json_schema here (returned fenced markdown + a bare
-		// array), so the parse failed and the raw un-deduped list was saved.
-		Model: "deepseek/deepseek-v4-flash",
-		ResponseSchema: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"questions": map[string]interface{}{
-					"type": "array",
-					"items": map[string]interface{}{
-						"type": "object",
-						"properties": map[string]interface{}{
-							"question": map[string]interface{}{"type": "string"},
-							"answer":   map[string]interface{}{"type": "string"},
-						},
-						"required": []string{"question", "answer"},
-					},
+	pairs := make([]qaCandidatePair, 0, len(questions)*(len(questions)-1)/2)
+	jevQuestions := make(map[string]types.JevQuestion, len(questions)*(len(questions)-1))
+	for first := 0; first < len(questions); first++ {
+		for second := first + 1; second < len(questions); second++ {
+			pair := qaCandidatePair{first: first, second: second}
+			pairs = append(pairs, pair)
+			jevQuestions[qaSameQuestionKey(pair)] = types.JevQuestion{
+				Type:         "noul",
+				Instructions: fmt.Sprintf("Do Q&A entries %d and %d clearly express the exact same underlying application question, despite any wording differences? Be conservative: distinct intent means false.", first, second),
+				Criteria: map[string]string{
+					"true":  "Both entries ask for the same underlying fact or response.",
+					"false": "The entries have different intent, or equivalence is uncertain.",
 				},
-			},
-			"required": []string{"questions"},
-		},
+			}
+			jevQuestions[qaCompatibleAnswersKey(pair)] = types.JevQuestion{
+				Type:         "noul",
+				Instructions: fmt.Sprintf("Are the answers for Q&A entries %d and %d clearly the same value, allowing only harmless formatting or case differences? Do not treat contradictory or substantively different answers as compatible.", first, second),
+				Criteria: map[string]string{
+					"true":  "The answers clearly express the same value.",
+					"false": "The answers conflict, differ substantively, or equivalence is uncertain.",
+				},
+			}
+		}
+	}
+
+	state := struct {
+		Questions []indexedQA `json:"questions"`
+	}{Questions: make([]indexedQA, len(questions))}
+	for index, question := range questions {
+		state.Questions[index] = indexedQA{Index: index, Question: question.Question, Answer: question.Answer}
+	}
+
+	var jevResponse types.JevResponse
+	if err := workflow.ExecuteActivity(ctx, "CallJev", types.JevRequest{
+		State:            state,
+		Questions:        jevQuestions,
 		IdUser:           idUser,
 		IdJobApplication: &idJobApplication,
+	}).Get(ctx, &jevResponse); err != nil {
+		return nil, fmt.Errorf("CallJev Q&A deduplication: %w", err)
 	}
 
-	var llmResponse types.AIPIResponse
-	if err := workflow.ExecuteActivity(ctx, "CallLLM", llmRequest).Get(ctx, &llmResponse); err != nil {
-		return nil, fmt.Errorf("CallLLM: %w", err)
+	decisions, err := validateQADedupDecisions(jevResponse.Answers, pairs, len(questions))
+	if err != nil {
+		return nil, err
 	}
-
-	return parseDeduplicateQAResponse(llmResponse.Content)
+	return mergeEquivalentQA(questions, decisions), nil
 }
 
-// parseDeduplicateQAResponse tolerates the two ways the LLM drifts from the schema:
-// markdown code fences around the JSON, and a bare array instead of {"questions":[...]}.
-// Without this, a stray fence silently discards the dedup result and the raw list is saved.
-func parseDeduplicateQAResponse(content string) ([]sqldb.JobApplicationQuestion, error) {
-	cleaned := stripJSONCodeFence(content)
+const qaJevThreshold = 0.8
 
-	var resp deduplicateQAResponse
-	if err := json.Unmarshal([]byte(cleaned), &resp); err == nil {
-		return resp.Questions, nil
-	}
-
-	// Fall back to a bare array top level.
-	var arr []sqldb.JobApplicationQuestion
-	if err := json.Unmarshal([]byte(cleaned), &arr); err != nil {
-		return nil, fmt.Errorf("unmarshal dedup response: %w", err)
-	}
-	return arr, nil
+type indexedQA struct {
+	Index    int    `json:"index"`
+	Question string `json:"question"`
+	Answer   string `json:"answer"`
 }
 
-// stripJSONCodeFence removes a surrounding ```json ... ``` (or plain ``` ... ```) fence.
-func stripJSONCodeFence(s string) string {
-	s = strings.TrimSpace(s)
-	if !strings.HasPrefix(s, "```") {
-		return s
+type qaCandidatePair struct {
+	first  int
+	second int
+}
+
+type qaPairDecision struct {
+	sameQuestion     bool
+	compatibleAnswer bool
+}
+
+func qaSameQuestionKey(pair qaCandidatePair) string {
+	return fmt.Sprintf("same_question_%d_%d", pair.first, pair.second)
+}
+
+func qaCompatibleAnswersKey(pair qaCandidatePair) string {
+	return fmt.Sprintf("compatible_answers_%d_%d", pair.first, pair.second)
+}
+
+func validateQADedupDecisions(answers map[string]types.JevAnswer, pairs []qaCandidatePair, questionCount int) (map[qaCandidatePair]qaPairDecision, error) {
+	expected := make(map[string]qaCandidatePair, len(pairs)*2)
+	seenPairs := make(map[qaCandidatePair]struct{}, len(pairs))
+	for _, pair := range pairs {
+		if pair.first < 0 || pair.second <= pair.first || pair.second >= questionCount {
+			return nil, fmt.Errorf("JEV Q&A deduplication has invalid candidate indexes %d,%d", pair.first, pair.second)
+		}
+		if _, ok := seenPairs[pair]; ok {
+			return nil, fmt.Errorf("JEV Q&A deduplication has duplicate candidate indexes %d,%d", pair.first, pair.second)
+		}
+		seenPairs[pair] = struct{}{}
+		expected[qaSameQuestionKey(pair)] = pair
+		expected[qaCompatibleAnswersKey(pair)] = pair
 	}
-	s = strings.TrimPrefix(s, "```")
-	s = strings.TrimPrefix(s, "json")
-	s = strings.TrimPrefix(s, "JSON")
-	if i := strings.LastIndex(s, "```"); i >= 0 {
-		s = s[:i]
+	for key := range answers {
+		if _, ok := expected[key]; !ok {
+			return nil, fmt.Errorf("JEV Q&A deduplication returned unexpected decision %q", key)
+		}
 	}
-	return strings.TrimSpace(s)
+	if len(answers) != len(expected) {
+		return nil, fmt.Errorf("JEV Q&A deduplication returned %d decisions, want %d", len(answers), len(expected))
+	}
+
+	decisions := make(map[qaCandidatePair]qaPairDecision, len(pairs))
+	for key, pair := range expected {
+		answer, ok := answers[key]
+		if !ok {
+			return nil, fmt.Errorf("JEV Q&A deduplication is missing decision %q", key)
+		}
+		if answer.Type != "noul" || answer.Noul == nil || math.IsNaN(*answer.Noul) || math.IsInf(*answer.Noul, 0) || *answer.Noul < 0 || *answer.Noul > 1 {
+			return nil, fmt.Errorf("JEV Q&A deduplication returned invalid decision %q", key)
+		}
+		decision := decisions[pair]
+		if key == qaSameQuestionKey(pair) {
+			decision.sameQuestion = *answer.Noul >= qaJevThreshold
+		} else {
+			decision.compatibleAnswer = *answer.Noul >= qaJevThreshold
+		}
+		decisions[pair] = decision
+	}
+	return decisions, nil
+}
+
+func mergeEquivalentQA(questions []sqldb.JobApplicationQuestion, decisions map[qaCandidatePair]qaPairDecision) []sqldb.JobApplicationQuestion {
+	groups := make([][]int, 0, len(questions))
+	for index := range questions {
+		merged := false
+		for groupIndex, group := range groups {
+			canMerge := true
+			for _, member := range group {
+				pair := qaCandidatePair{first: member, second: index}
+				decision, ok := decisions[pair]
+				if !ok || !decision.sameQuestion || !decision.compatibleAnswer {
+					canMerge = false
+					break
+				}
+			}
+			if canMerge {
+				groups[groupIndex] = append(group, index)
+				merged = true
+				break
+			}
+		}
+		if !merged {
+			groups = append(groups, []int{index})
+		}
+	}
+
+	mergedQuestions := make([]sqldb.JobApplicationQuestion, 0, len(groups))
+	for _, group := range groups {
+		selected := questions[group[0]]
+		for _, index := range group[1:] {
+			if len(strings.TrimSpace(questions[index].Question)) > len(strings.TrimSpace(selected.Question)) {
+				selected.Question = questions[index].Question
+			}
+		}
+		mergedQuestions = append(mergedQuestions, selected)
+	}
+	return mergedQuestions
 }

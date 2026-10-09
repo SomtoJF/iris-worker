@@ -1,4 +1,4 @@
-package jobapplication
+package autofill
 
 import (
 	"bytes"
@@ -11,6 +11,7 @@ import (
 	"github.com/SomtoJF/iris-worker/activity/sqldb"
 	"github.com/SomtoJF/iris-worker/activity/web"
 	"github.com/SomtoJF/iris-worker/aipi/types"
+	jobapplicationprofile "github.com/SomtoJF/iris-worker/workflow/jobapplication/profile"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
@@ -101,7 +102,7 @@ func AutofillApplicationWorkflow(ctx workflow.Context, input AutofillApplication
 		return AutofillApplicationWorkflowResponse{}, fmt.Errorf("get resume: %w", err)
 	}
 
-	userProfile, err := fetchJobApplicationProfile(ctx, input.IdUser)
+	userProfile, err := jobapplicationprofile.Fetch(ctx, input.IdUser)
 	if err != nil {
 		logger.Error("Failed to fetch job application profile", "error", err)
 		return AutofillApplicationWorkflowResponse{}, fmt.Errorf("fetch job application profile: %w", err)
@@ -147,12 +148,12 @@ func AutofillApplicationWorkflow(ctx workflow.Context, input AutofillApplication
 		PagesContext:               pagesContext,
 	}
 
-	systemPrompt, err := executeAutofillTemplate(Templates.Autofill.System, promptData)
+	systemPrompt, err := executeAutofillTemplate(Templates.System, promptData)
 	if err != nil {
 		logger.Error("Failed to render autofill system prompt", "error", err)
 		return AutofillApplicationWorkflowResponse{}, fmt.Errorf("render autofill system prompt: %w", err)
 	}
-	userPrompt, err := executeAutofillTemplate(Templates.Autofill.User, promptData)
+	userPrompt, err := executeAutofillTemplate(Templates.User, promptData)
 	if err != nil {
 		logger.Error("Failed to render autofill user prompt", "error", err)
 		return AutofillApplicationWorkflowResponse{}, fmt.Errorf("render autofill user prompt: %w", err)

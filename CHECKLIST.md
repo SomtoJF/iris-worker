@@ -2,15 +2,29 @@
 
 ## Urgent
 
-- [ ] Make mobile responsive
+- [ ] Figure out the best and cost-effective browser use model
+- [ ] Autoselect resumes with Jev
 - [ ] Cant scan this page. Basically anypage where greenhouse is embedded into the actual company's site, we can't scan [https://www.riskified.com/job-description/?gh_jid=8635191002#apply](https://www.riskified.com/job-description/?gh_jid=8635191002#apply)
-- [ ] Migrate server infra to kernel
-- [ ] Customize cover letters
+- [ ] Design a notification system for the extension that shows when:
+  - an automated application is completed
+  - a report is finished generating
+  - a feedback request written by the user has a comment
+    This notification system should be able to handle links to the specific application, report, or feedback.
+
+## Medium
+
 - [ ] Functionality to tailor resumes to each application (see how to visualize it like git diffs)
 
-## Others
+## Low
 
+- [ ] Customize cover letters
 - [ ] Implement email notifications on successful/failed applications, comments on feedback and user action required. (Mailjet)
+- [ ] What if you could follow other users and copy their applications? insane stuff
+
+## Completed
+
+- [x] Migrate server infra to kernel
+- [x] Make mobile responsive
 - [x] Inspect onboarding flow
 - [x] Add response status to application model
 - [x] Add chrome extension link to the marketing page and client dash

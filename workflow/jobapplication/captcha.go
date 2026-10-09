@@ -26,7 +26,7 @@ func maybeSolveCaptcha(sessionCtx workflow.Context, workflowID string, userID ui
 	if err != nil {
 		return false, err
 	}
-	if detected.Type == browseractivity.CaptchaTypeNone {
+	if detected.Type == browseractivity.CaptchaTypeNone || detected.Type == "" {
 		return false, nil
 	}
 

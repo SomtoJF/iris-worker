@@ -1,24 +1,32 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log"
+	"os"
 
 	"github.com/SomtoJF/iris-worker/activity/browser"
 	"github.com/SomtoJF/iris-worker/activity/captcha"
 	"github.com/SomtoJF/iris-worker/activity/llm"
 	"github.com/SomtoJF/iris-worker/activity/realtimeevent"
 	s3Activities "github.com/SomtoJF/iris-worker/activity/s3"
-	sqldbActivities "github.com/SomtoJF/iris-worker/activity/sqldb"
+	sqldbActivity "github.com/SomtoJF/iris-worker/activity/sqldb"
 	"github.com/SomtoJF/iris-worker/activity/web"
 	"github.com/SomtoJF/iris-worker/common"
 	"github.com/SomtoJF/iris-worker/initializers/env"
+	"github.com/SomtoJF/iris-worker/workflow/autofill"
+	"github.com/SomtoJF/iris-worker/workflow/browserpool"
 	"github.com/SomtoJF/iris-worker/workflow/coverletter"
 	"github.com/SomtoJF/iris-worker/workflow/handleuseraction"
+	"github.com/SomtoJF/iris-worker/workflow/initiateapplication"
 	"github.com/SomtoJF/iris-worker/workflow/jobapplication"
 	"github.com/SomtoJF/iris-worker/workflow/jobdiscovery"
 	"github.com/SomtoJF/iris-worker/workflow/processresume"
 	"github.com/SomtoJF/iris-worker/workflow/submitapplication"
 	"github.com/SomtoJF/iris-worker/workflow/summarizeissue"
+	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/worker"
 )
 
@@ -53,6 +61,10 @@ func main() {
 	registerJobApplicationWorkflows(w)
 	registerJobApplicationActivities(w, dependencies)
 
+	if err := startBrowserPoolWorkflow(temporalClient, os.Getenv("BROWSER_POOL_WORKFLOW_ID")); err != nil {
+		log.Fatal(err)
+	}
+
 	// Start listening to the Task Queue.
 	err = w.Run(worker.InterruptCh())
 	if err != nil {
@@ -62,8 +74,9 @@ func main() {
 
 func registerJobApplicationWorkflows(w worker.Worker) {
 	w.RegisterWorkflow(jobapplication.JobApplicationWorkflow)
-	w.RegisterWorkflow(jobapplication.AutofillApplicationWorkflow)
-	w.RegisterWorkflow(jobapplication.InitiateApplicationWorkflow)
+	w.RegisterWorkflow(browserpool.BrowserPoolWorkflow)
+	w.RegisterWorkflow(autofill.AutofillApplicationWorkflow)
+	w.RegisterWorkflow(initiateapplication.InitiateApplicationWorkflow)
 	w.RegisterWorkflow(processresume.ProcessResumeWorkflow)
 	w.RegisterWorkflow(coverletter.CoverLetterWorkflow)
 	w.RegisterWorkflow(submitapplication.SubmitApplicationWorkflow)
@@ -78,13 +91,16 @@ func registerJobApplicationActivities(w worker.Worker, dependencies common.Depen
 	aipiClient := dependencies.GetAIPIClient()
 	browserClient := dependencies.GetBrowserClient()
 
-	sqldbActivities := sqldbActivities.NewActivities(db)
+	sqldbActivities := sqldbActivity.NewActivitiesWithBrowserProvider(
+		db,
+		sqldbActivity.BrowserProvider(browserClient.GetBrowserProvider()),
+	)
 	w.RegisterActivity(sqldbActivities)
 
 	llmActivities := llm.NewActivity(aipiClient)
 	w.RegisterActivity(llmActivities)
 
-	browserActivities := browser.NewActivities(browserClient)
+	browserActivities := browser.NewActivities(browserClient, sqldbActivity.NewBrowserStore(db))
 	w.RegisterActivity(browserActivities)
 
 	webActivities := web.NewActivity(db)
@@ -102,9 +118,36 @@ func registerJobApplicationActivities(w worker.Worker, dependencies common.Depen
 
 func loadTemplates() {
 	jobapplication.SetTemplates()
+	autofill.SetTemplates()
 	coverletter.SetTemplates()
 	handleuseraction.SetTemplates()
 	if err := jobdiscovery.SetTemplates(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func startBrowserPoolWorkflow(temporalClient client.Client, workflowID string) error {
+	if workflowID == "" {
+		return fmt.Errorf("BROWSER_POOL_WORKFLOW_ID environment variable is not set")
+	}
+
+	_, err := temporalClient.ExecuteWorkflow(
+		context.Background(),
+		client.StartWorkflowOptions{
+			ID:        workflowID,
+			TaskQueue: string(JobApplicationTaskQueueName),
+		},
+		browserpool.BrowserPoolWorkflow,
+		browserpool.BrowserPoolWorkflowInput{},
+	)
+	if temporal.IsWorkflowExecutionAlreadyStartedError(err) {
+		log.Printf("Browser pool workflow %q is already running", workflowID)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("start browser pool workflow %q: %w", workflowID, err)
+	}
+
+	log.Printf("Started browser pool workflow %q", workflowID)
+	return nil
 }

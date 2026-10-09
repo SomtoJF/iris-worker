@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	browserSQL "github.com/SomtoJF/iris-worker/activity/sqldb"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -32,6 +33,11 @@ func ConnectToPostgres() (*gorm.DB, error) {
 
 	if err != nil {
 		slog.Error("Failed to connect to database", "error", err)
+		return nil, err
+	}
+
+	if err := browserSQL.MigrateBrowserSchema(db); err != nil {
+		slog.Error("Failed to initialize browser persistence schema", "error", err)
 		return nil, err
 	}
 

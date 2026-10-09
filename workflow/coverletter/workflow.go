@@ -14,12 +14,10 @@ import (
 )
 
 type TemplateSet struct {
-	System          *template.Template
-	User            *template.Template
-	EditSystem      *template.Template
-	EditUser        *template.Template
-	LLMFilterSystem *template.Template
-	LLMFilterUser   *template.Template
+	System     *template.Template
+	User       *template.Template
+	EditSystem *template.Template
+	EditUser   *template.Template
 }
 
 var Templates TemplateSet
@@ -97,14 +95,6 @@ func SetTemplates() {
 		panic(err)
 	}
 	Templates.EditUser, err = helper.LoadTemplate("workflow/coverletter/prompt/edit/user.go.tmpl")
-	if err != nil {
-		panic(err)
-	}
-	Templates.LLMFilterSystem, err = helper.LoadTemplate("workflow/coverletter/prompt/llmfilter/system.go.tmpl")
-	if err != nil {
-		panic(err)
-	}
-	Templates.LLMFilterUser, err = helper.LoadTemplate("workflow/coverletter/prompt/llmfilter/user.go.tmpl")
 	if err != nil {
 		panic(err)
 	}

@@ -8,11 +8,16 @@ import (
 )
 
 type Activity struct {
-	db *gorm.DB
+	db              *gorm.DB
+	browserProvider BrowserProvider
 }
 
 func NewActivities(db *gorm.DB) *Activity {
-	return &Activity{db: db}
+	return NewActivitiesWithBrowserProvider(db, BrowserProviderRod)
+}
+
+func NewActivitiesWithBrowserProvider(db *gorm.DB, browserProvider BrowserProvider) *Activity {
+	return &Activity{db: db, browserProvider: browserProvider}
 }
 
 type UpdateJobApplicationInput struct {
@@ -30,6 +35,7 @@ const (
 	JobApplicationStatusBlocked    = model.JobApplicationStatusBlocked
 	JobApplicationStatusCancelled  = model.JobApplicationStatusCancelled
 	JobApplicationStatusHalted     = model.JobApplicationStatusHalted
+	JobApplicationStatusQueued     = model.JobApplicationStatusQueued
 )
 
 func (a *Activity) UpdateJobApplication(ctx context.Context, input UpdateJobApplicationInput) error {

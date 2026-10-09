@@ -1,7 +1,6 @@
 package jobapplication
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -9,17 +8,35 @@ import (
 	"github.com/SomtoJF/iris-worker/activity/browser"
 	"github.com/SomtoJF/iris-worker/activity/realtimeevent"
 	"github.com/SomtoJF/iris-worker/activity/sqldb"
-	"github.com/SomtoJF/iris-worker/browserfactory"
+	browserpooltypes "github.com/SomtoJF/iris-worker/workflow/browserpool/types"
+	"github.com/google/uuid"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
 
 type JobApplicationWorkflowInput struct {
 	IdJobApplication      uint   `json:"id_job_application"`
-	ApplicationExternalId string `json:"application_external_id"`
-	Url                   string `json:"url"`
-	IdUser                uint   `json:"id_user"`
-	IdResume              uint   `json:"id_resume"`
+	BrowserPoolWorkflowID string `json:"browser_pool_workflow_id,omitempty"`
+	NewReplayGeneration   bool   `json:"new_replay_generation,omitempty"`
+	ResumeUserActionID    uint   `json:"resume_user_action_id,omitempty"`
+}
+
+type jobApplicationRuntimeInput struct {
+	IdJobApplication      uint
+	ApplicationExternalId string
+	Url                   string
+	IdUser                uint
+	IdResume              uint
+	BrowserPoolWorkflowID string
+	ResumeUserActionID    uint
+	DurableResumeVersion  bool
+}
+
+type JobDetails struct {
+	JobTitle          string
+	CompanyName       string
+	JobDescription    string
+	IsValidJobPosting bool
 }
 
 const CancelSignalName = "CANCEL_APPLICATION"
@@ -75,7 +92,7 @@ func handleCancelOrTimeout(
 	ctx workflow.Context,
 	cancelCtx workflow.Context,
 	timedOut bool,
-	input JobApplicationWorkflowInput,
+	input jobApplicationRuntimeInput,
 	jobDetails JobDetails,
 	cancelPayload CancelSignalPayload,
 ) (handled bool, err error) {
@@ -92,15 +109,15 @@ func handleCancelOrTimeout(
 	return true, nil
 }
 
-const SESSION_TIMEOUT = 23*time.Hour + 50*time.Minute
+const SESSION_TIMEOUT = 30 * time.Minute
 
 func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowInput) error {
 	logger := workflow.GetLogger(ctx)
 
-	logger.Info("JobApplicationWorkflow started", "url", input.Url)
+	logger.Info("JobApplicationWorkflow started", "id_job_application", input.IdJobApplication)
 
 	activityOptions := workflow.ActivityOptions{
-		StartToCloseTimeout: 5 * time.Minute,
+		StartToCloseTimeout: 2 * time.Minute,
 		RetryPolicy: &temporal.RetryPolicy{
 			InitialInterval:    time.Second,
 			BackoffCoefficient: 2.0,
@@ -109,6 +126,7 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		},
 	}
 	ctx = workflow.WithActivityOptions(ctx, activityOptions)
+	defer notifyBrowserPoolApplicationSettled(ctx, input)
 
 	// Set up cancellation signal listener
 	cancelCtx, cancelFunc := workflow.WithCancel(ctx)
@@ -129,9 +147,48 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		cancelFunc()
 	})
 
-	workflowId := workflow.GetInfo(ctx).WorkflowExecution.ID
+	var application sqldb.JobApplication
+	if err := workflow.ExecuteActivity(ctx, "GetJobApplication", sqldb.GetJobApplicationInput{
+		IdJobApplication: input.IdJobApplication,
+	}).Get(ctx, &application); err != nil {
+		logger.Error("Failed to get job application", "error", err)
+		return err
+	}
+	jobDetails := JobDetails{
+		JobTitle:          application.JobTitle,
+		CompanyName:       application.CompanyName,
+		JobDescription:    application.JobDescription,
+		IsValidJobPosting: true,
+	}
+	applicationBrowserID := workflow.GetInfo(ctx).WorkflowExecution.ID
+	if workflow.GetVersion(ctx, "persisted-application-browser-id", workflow.DefaultVersion, 1) == 1 {
+		resolvedBrowserID, resolveErr := resolveApplicationBrowserID(ctx, application)
+		if resolveErr != nil {
+			logger.Error("Failed to resolve application browser ID", "error", resolveErr)
+			return resolveErr
+		}
+		applicationBrowserID = resolvedBrowserID
+	}
+	if err := beginBrowserReplayGeneration(ctx, input.NewReplayGeneration, applicationBrowserID); err != nil {
+		logger.Error("Failed to start browser replay generation", "error", err)
+		return err
+	}
+	runtimeInput := jobApplicationRuntimeInput{
+		IdJobApplication:      application.IdJobApplication,
+		ApplicationExternalId: application.IdExternal.String(),
+		Url:                   application.Url,
+		IdUser:                application.UserId,
+		IdResume:              application.ResumeId,
+		BrowserPoolWorkflowID: input.BrowserPoolWorkflowID,
+		ResumeUserActionID:    input.ResumeUserActionID,
+	}
+	durableResumeVersion := workflow.GetVersion(ctx, "durable-user-action-resume", workflow.DefaultVersion, 1)
+	runtimeInput.DurableResumeVersion = durableResumeVersion == 1
 
-	var jobDetails JobDetails
+	if workflow.GetVersion(ctx, "mark-application-processing", workflow.DefaultVersion, 1) == 1 {
+		markApplicationProcessing(ctx, runtimeInput, jobDetails)
+	}
+
 	var execResult executeJobApplicationResult
 
 	sessionCtx, err := workflow.CreateSession(cancelCtx, &workflow.SessionOptions{
@@ -139,18 +196,18 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		CreationTimeout:  time.Minute,
 	})
 	if err != nil {
-		if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
+		if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, runtimeInput, jobDetails, cancelPayload); handled {
 			return cerr
 		}
 		logger.Error("Failed to create session", "error", err)
-		handleApplicationError(ctx, input, jobDetails, "An error occurred while starting your application session")
+		handleApplicationError(ctx, runtimeInput, jobDetails, "An error occurred while starting your application session")
 		return err
 	}
 	defer workflow.CompleteSession(sessionCtx)
 
-	err = executeJobApplication(ctx, cancelCtx, sessionCtx, workflowId, input, &jobDetails, &execResult)
+	err = executeJobApplication(ctx, cancelCtx, sessionCtx, applicationBrowserID, runtimeInput, &jobDetails, &execResult)
 	if err != nil {
-		if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, input, jobDetails, cancelPayload); handled {
+		if handled, cerr := handleCancelOrTimeout(ctx, cancelCtx, timedOut, runtimeInput, jobDetails, cancelPayload); handled {
 			return cerr
 		}
 
@@ -174,18 +231,22 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		}
 
 		if terminalStatus == sqldb.JobApplicationStatusHalted {
-			handleApplicationHalted(ctx, input, jobDetails, publicMessage)
+			handleApplicationHalted(ctx, runtimeInput, jobDetails, publicMessage)
 		} else {
-			handleApplicationError(ctx, input, jobDetails, publicMessage)
+			handleApplicationError(ctx, runtimeInput, jobDetails, publicMessage)
 		}
 		return err
 	}
 
-	handleApplicationSuccess(ctx, input, jobDetails)
+	if execResult.UserActionPaused {
+		return nil
+	}
+
+	handleApplicationSuccess(ctx, runtimeInput, jobDetails)
 
 	questions := mapToQuestions(execResult.QAMap)
 	if len(questions) > 0 {
-		deduped, err := deduplicateQA(ctx, input.IdUser, input.IdJobApplication, questions)
+		deduped, err := deduplicateQA(ctx, runtimeInput.IdUser, runtimeInput.IdJobApplication, questions)
 		if err != nil {
 			logger.Warn("Failed to deduplicate Q&A, saving raw", "error", err)
 		} else {
@@ -193,12 +254,12 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 		}
 	}
 
-	if err := saveApplicationData(ctx, input.IdUser, input.IdJobApplication, questions); err != nil {
+	if err := saveApplicationData(ctx, runtimeInput.IdUser, runtimeInput.IdJobApplication, questions); err != nil {
 		logger.Error("Failed to save application data", "error", err)
 	}
 
 	if execResult.CoverLetter != nil && *execResult.CoverLetter != "" {
-		if err := upsertCoverLetter(ctx, input, jobDetails, *execResult.CoverLetter); err != nil {
+		if err := upsertCoverLetter(ctx, runtimeInput, jobDetails, *execResult.CoverLetter); err != nil {
 			logger.Error("Failed to save cover letter", "error", err)
 		}
 	}
@@ -206,9 +267,81 @@ func JobApplicationWorkflow(ctx workflow.Context, input JobApplicationWorkflowIn
 	return nil
 }
 
+type applicationBrowserIDResult struct {
+	Found bool   `json:"Found"`
+	ID    string `json:"ID"`
+}
+
+func resolveApplicationBrowserID(ctx workflow.Context, application sqldb.JobApplication) (string, error) {
+	var persisted applicationBrowserIDResult
+	if err := workflow.ExecuteActivity(ctx, "GetApplicationBrowserID", application.IdJobApplication).Get(ctx, &persisted); err != nil {
+		return "", fmt.Errorf("get persisted application browser ID: %w", err)
+	}
+	if persisted.Found {
+		browserID, err := uuid.Parse(persisted.ID)
+		if err != nil {
+			return "", fmt.Errorf("parse persisted application browser ID: %w", err)
+		}
+		return browserID.String(), nil
+	}
+
+	var proposedID string
+	if err := workflow.SideEffect(ctx, func(workflow.Context) interface{} {
+		return uuid.NewString()
+	}).Get(&proposedID); err != nil {
+		return "", fmt.Errorf("generate application browser ID: %w", err)
+	}
+	if _, err := uuid.Parse(proposedID); err != nil {
+		return "", fmt.Errorf("generate application browser ID: %w", err)
+	}
+
+	var browserID string
+	if err := workflow.ExecuteActivity(ctx, "CreateApplicationBrowserID", sqldb.CreateApplicationBrowserIDInput{
+		IdJobApplication: application.IdJobApplication,
+		ID:               proposedID,
+	}).Get(ctx, &browserID); err != nil {
+		return "", fmt.Errorf("persist application browser ID: %w", err)
+	}
+	parsedID, err := uuid.Parse(browserID)
+	if err != nil {
+		return "", fmt.Errorf("parse persisted application browser ID: %w", err)
+	}
+	return parsedID.String(), nil
+}
+
+func beginBrowserReplayGeneration(ctx workflow.Context, startNewGeneration bool, applicationBrowserID string) error {
+	if workflow.GetVersion(ctx, "explicit-browser-replay-generation", workflow.DefaultVersion, 1) != 1 || !startNewGeneration {
+		return nil
+	}
+	return workflow.ExecuteActivity(ctx, "BeginBrowserReplayGeneration", sqldb.BeginBrowserReplayGenerationInput{
+		ApplicationBrowserID: applicationBrowserID,
+		WorkflowID:           workflow.GetInfo(ctx).WorkflowExecution.ID,
+	}).Get(ctx, nil)
+}
+
+func notifyBrowserPoolApplicationSettled(ctx workflow.Context, input JobApplicationWorkflowInput) {
+	if input.BrowserPoolWorkflowID == "" {
+		return
+	}
+
+	ctx, _ = workflow.NewDisconnectedContext(ctx)
+
+	err := workflow.SignalExternalWorkflow(
+		ctx,
+		input.BrowserPoolWorkflowID,
+		"",
+		browserpooltypes.BROWSER_POOL_APPLICATION_SETTLED_SIGNAL_NAME,
+		browserpooltypes.BrowserPoolApplicationSettledPayload{IdJobApplication: input.IdJobApplication},
+	).Get(ctx, nil)
+	if err != nil {
+		workflow.GetLogger(ctx).Error("Failed to signal browser pool application completion", "error", err)
+	}
+}
+
 type executeJobApplicationResult struct {
-	CoverLetter *string
-	QAMap       map[string]string
+	CoverLetter      *string
+	QAMap            map[string]string
+	UserActionPaused bool
 }
 
 func executeJobApplication(
@@ -216,176 +349,133 @@ func executeJobApplication(
 	cancelCtx workflow.Context,
 	sessionCtx workflow.Context,
 	workflowID string,
-	input JobApplicationWorkflowInput,
+	input jobApplicationRuntimeInput,
 	jobDetails *JobDetails,
 	result *executeJobApplicationResult,
 ) error {
-	userResume, err := fetchUserResume(cancelCtx, input.IdResume)
+	session, err := loadApplicationInputs(cancelCtx, input)
 	if err != nil {
-		return newJobAppError(err, "Failed to fetch user resume", "An error occurred while fetching your resume")
+		return err
 	}
 
-	userProfile, err := fetchJobApplicationProfile(cancelCtx, input.IdUser)
-	if err != nil {
-		return newJobAppError(err, "Failed to fetch user profile", "An error occurred while fetching your profile")
-	}
-
-	resumePath, err := loadResumeIntoMemory(cancelCtx, userResume.FileName, userResume.FileKey)
-	if err != nil {
-		return newJobAppError(err, "Failed to download and load resume into memory", "An error occurred while loading your resume into memory")
-	}
-
-	if err := openWebpage(sessionCtx, workflowID, input.Url); err != nil {
-		return newJobAppError(err, "Failed to open webpage", "We couldn't open the job posting page")
-	}
-
-	// Ensure browser resources are released even if the session is canceled/times out.
-	// Use a disconnected context derived from the base workflow context, not the session context.
+	// Ensure browser resources are released even if startup fails or the session is canceled.
 	defer func() {
-		newCtx, _ := workflow.NewDisconnectedContext(ctx)
-		closeOpts := workflow.ActivityOptions{
-			StartToCloseTimeout: 30 * time.Second,
-			RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
+		if err := closeApplicationBrowser(ctx, workflowID); err != nil {
+			workflow.GetLogger(ctx).Error("Failed to close application browser", "error", err)
 		}
-		newCtx = workflow.WithActivityOptions(newCtx, closeOpts)
-		workflow.ExecuteActivity(newCtx, "ClosePage", browser.ClosePageInput{
-			WorkflowID: workflowID,
-		}).Get(newCtx, nil)
 	}()
 
-	retrieved, err := retrieveJobDetails(sessionCtx, workflowID, input.Url, input.IdUser, input.IdJobApplication)
+	browserProvider, err := openApplicationPage(ctx, sessionCtx, workflowID, input)
 	if err != nil {
-		return newJobAppError(err, "Failed to retrieve job details", "We couldn't retrieve the job details")
+		return err
 	}
-	*jobDetails = retrieved
-
-	if !jobDetails.IsValidJobPosting {
-		return newJobAppError(
-			temporal.NewNonRetryableApplicationError("invalid job posting", "InvalidJobPosting", nil),
-			"Invalid job posting",
-			"The job posting is invalid. The link doesn't contain the job description",
-		)
+	if err := finishSessionSetup(ctx, session, input); err != nil {
+		return err
 	}
 
-	if err := updateJobApplication(cancelCtx, input.IdJobApplication, map[string]interface{}{
-		"job_title":       jobDetails.JobTitle,
-		"company_name":    jobDetails.CompanyName,
-		"job_description": jobDetails.JobDescription,
-	}); err != nil {
-		return newJobAppError(err, "Failed to update job application", "We couldn't update the job application")
+	// screenshotCtx is used to capture screenshots for LLM
+	screenCtx := workflow.WithActivityOptions(sessionCtx,
+		workflow.ActivityOptions{
+			StartToCloseTimeout: 10 * time.Second,
+			RetryPolicy: &temporal.RetryPolicy{
+				MaximumAttempts: 10,
+				MaximumInterval: 10 * time.Second,
+			},
+		})
+
+	state := &agentLoopState{
+		ctx:             ctx,
+		cancelCtx:       cancelCtx,
+		sessionCtx:      sessionCtx,
+		screenCtx:       screenCtx,
+		workflowID:      workflowID,
+		browserProvider: browserProvider,
+		input:           input,
+		jobDetails:      jobDetails,
+		session:         session,
+		result:          result,
+		toolHistory:     []ToolCallResult{},
+		qaMap:           make(map[string]string),
 	}
 
-	userProfileBytes, err := json.Marshal(userProfile)
-	if err != nil {
-		return newJobAppError(err, "Failed to marshal user profile", "We couldn't marshal the user profile")
-	}
-	userProfileJSON := string(userProfileBytes)
-
-	isApplicationComplete := false
-	toolCallHistory := []ToolCallResult{}
-	qaMap := make(map[string]string)
 	const maxAgentIterations = 50
-
-	for iteration := 0; !isApplicationComplete && iteration < maxAgentIterations; iteration++ {
-		var screenshot browser.TakeScreenshotOutput
-		err = workflow.ExecuteActivity(sessionCtx, "TakeScreenshot", browser.TakeScreenshotInput{
-			WorkflowID: workflowID,
-			FileName:   fmt.Sprintf("screenshot_%d.png", iteration),
-		}).Get(sessionCtx, &screenshot)
-		if err != nil {
-			return newJobAppError(err, "Failed to take screenshot", "We couldn't continue the application because we failed to capture the page state")
+	for i := 0; !state.complete && i < maxAgentIterations; i++ {
+		if err := runAgentIteration(state, i); err != nil {
+			return err
 		}
-
-		// Deterministically detect + solve any captcha before the planner sees the page,
-		// so the planner never has to reason about captchas. Re-screenshot afterwards if
-		// a captcha was solved so tagged nodes reflect the cleared page.
-		solvedCaptcha, err := maybeSolveCaptcha(sessionCtx, workflowID, input.IdUser, input.IdJobApplication)
-		if err != nil {
-			return newJobAppError(err, "Failed to handle captcha", "We couldn't get past a security check on the page")
-		}
-		if solvedCaptcha {
-			err = workflow.ExecuteActivity(sessionCtx, "TakeScreenshot", browser.TakeScreenshotInput{
-				WorkflowID: workflowID,
-				FileName:   fmt.Sprintf("screenshot_%d_postcaptcha.png", iteration),
-			}).Get(sessionCtx, &screenshot)
-			if err != nil {
-				return newJobAppError(err, "Failed to take screenshot after captcha", "We couldn't continue the application because we failed to capture the page state")
-			}
-		}
-
-		requiredFields := extractRequiredFields(screenshot.TaggedNodes)
-
-		plannerRequest := PlannerRequest{
-			IdUser:                  input.IdUser,
-			IdJobApplication:        input.IdJobApplication,
-			JobPostingUrl:           input.Url,
-			ScreenshotPath:          screenshot.Path,
-			TaggedNodes:             screenshot.TaggedNodes,
-			TaggedFileInputElements: screenshot.TaggedFileInputNodes,
-			ToolCallHistory:         toolCallHistory,
-			UserResume:              userResume.Content,
-			JobDescription:          jobDetails.JobDescription,
-			UserResumePath:          resumePath,
-			UserProfileJSON:         userProfileJSON,
-			RequiredFields:          requiredFields,
-			CurrentDate:             workflow.Now(cancelCtx).Format("2006-01-02"),
-		}
-
-		plannerResponse, err := planNextAction(cancelCtx, plannerRequest)
-		if err != nil {
-			return newJobAppError(err, "Failed to plan next action", "We couldn't continue the application because we failed to plan the next step")
-		}
-
-		if plannerResponse.IsApplicationFailed {
-			failureReason := "We couldn't complete your application. Please try again."
-			if plannerResponse.FailureReason != nil && *plannerResponse.FailureReason != "" {
-				failureReason = *plannerResponse.FailureReason
-			}
-			if plannerResponse.FailureStatus != nil && *plannerResponse.FailureStatus == PlannerFailureStatusTruthfulness {
-				return newHaltedJobAppError(fmt.Errorf("%s", failureReason), "Job application halted by truthfulness clause", failureReason)
-			}
-			return newJobAppError(fmt.Errorf("%s", failureReason), "Job application failed by planner", failureReason)
-		}
-
-		for _, qa := range plannerResponse.QuestionsAnswered {
-			if qa.Question != "" && qa.Answer != "" {
-				qaMap[qa.Question] = qa.Answer
-			}
-		}
-
-		isApplicationComplete = plannerResponse.IsApplicationComplete
-		if isApplicationComplete {
-			break
-		}
-
-		if plannerResponse.ToolCall != nil {
-			toolResult := executeToolCall(sessionCtx, workflowID, input.IdUser, input.IdJobApplication, *plannerResponse.ToolCall)
-			toolCallHistory = append(toolCallHistory, toolResult)
-
-			if toolResult.Error != nil && isCancelled(cancelCtx) {
-				return toolResult.Error
-			}
-
-			if plannerResponse.ToolCall.Name == "write_cover_letter" {
-				if cl, ok := toolResult.Result["cover_letter"].(string); ok {
-					result.CoverLetter = &cl
-				}
-			}
+		if state.paused {
+			return nil
 		}
 	}
 
-	if !isApplicationComplete {
+	return finalizeApplication(state)
+}
+
+// runAgentIteration: observe page, try the JEV flow (falls back to LLM flow), then plan and act.
+func runAgentIteration(s *agentLoopState, iteration int) error {
+	shot, err := captureSolvedScreenshot(s, iteration)
+	if err != nil {
+		return err
+	}
+
+	step, err := runJevFlow(s, iteration, shot)
+	if err != nil {
+		return err
+	}
+	if step == nil {
+		step = runLLMFlow(shot)
+	}
+
+	return planAndAct(s, step)
+}
+
+func takeScreenshot(ctx workflow.Context, workflowID, fileName string) (browser.TakeScreenshotOutput, error) {
+	var shot browser.TakeScreenshotOutput
+	err := workflow.ExecuteActivity(ctx, "TakeScreenshot", browser.TakeScreenshotInput{
+		WorkflowID: workflowID,
+		FileName:   fileName,
+	}).Get(ctx, &shot)
+	return shot, err
+}
+
+// captureSolvedScreenshot screenshots the page after deterministically clearing any captcha,
+// so the planner never has to reason about captchas.
+func captureSolvedScreenshot(s *agentLoopState, iteration int) (browser.TakeScreenshotOutput, error) {
+	shot, err := takeScreenshot(s.screenCtx, s.workflowID, fmt.Sprintf("screenshot_%d.png", iteration))
+	if err != nil {
+		return shot, newJobAppError(err, "Failed to take screenshot", "We couldn't continue the application because we failed to capture the page state")
+	}
+
+	if s.browserProvider == string(sqldb.BrowserProviderKernel) {
+		return shot, nil
+	}
+
+	solved, err := maybeSolveCaptcha(s.sessionCtx, s.workflowID, s.input.IdUser, s.input.IdJobApplication)
+	if err != nil {
+		return shot, newJobAppError(err, "Failed to handle captcha", "We couldn't get past a security check on the page")
+	}
+	if !solved {
+		return shot, nil
+	}
+
+	shot, err = takeScreenshot(s.sessionCtx, s.workflowID, fmt.Sprintf("screenshot_%d_postcaptcha.png", iteration))
+	if err != nil {
+		return shot, newJobAppError(err, "Failed to take screenshot after captcha", "We couldn't continue the application because we failed to capture the page state")
+	}
+	return shot, nil
+}
+
+func finalizeApplication(s *agentLoopState) error {
+	if !s.complete {
 		failureReason := "We couldn't complete your application. Please try again."
 		return newJobAppError(fmt.Errorf("%s", failureReason), "Job application incomplete", failureReason)
 	}
-
-	result.QAMap = qaMap
-
+	s.result.QAMap = s.qaMap
 	return nil
 }
 
-func extractRequiredFields(taggedNodes []browserfactory.SerializableTaggedNode) []browserfactory.SerializableTaggedNode {
-	required := make([]browserfactory.SerializableTaggedNode, 0)
+func extractRequiredFields(taggedNodes []browser.SerializableTaggedNode) []browser.SerializableTaggedNode {
+	required := make([]browser.SerializableTaggedNode, 0)
 	for _, node := range taggedNodes {
 		if node.Required == nil || !*node.Required {
 			continue
@@ -411,23 +501,48 @@ func extractRequiredFields(taggedNodes []browserfactory.SerializableTaggedNode) 
 	return required
 }
 
-func handleApplicationCancelled(ctx workflow.Context, input JobApplicationWorkflowInput, jobDetails JobDetails, reason string) {
+func handleApplicationCancelled(ctx workflow.Context, input jobApplicationRuntimeInput, jobDetails JobDetails, reason string) {
 	newCtx, _ := workflow.NewDisconnectedContext(ctx)
 	cleanupOpts := workflow.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
 		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
 	}
 	newCtx = workflow.WithActivityOptions(newCtx, cleanupOpts)
+	if workflow.GetVersion(ctx, "persist-application-cancellation", workflow.DefaultVersion, 1) == 1 {
+		data := map[string]interface{}{"status": sqldb.JobApplicationStatusCancelled}
+		if reason != "" {
+			data["cancellation_reason"] = reason
+		}
+		if err := updateJobApplication(newCtx, input.IdJobApplication, data); err != nil {
+			workflow.GetLogger(ctx).Error("Failed to persist application cancellation", "error", err)
+		}
+	}
 
-	workflow.ExecuteActivity(newCtx, "PublishRedisEvent", input.IdUser, string(realtimeevent.EventApplicationCancelled), map[string]interface{}{
+	if err := workflow.ExecuteActivity(newCtx, "PublishRedisEvent", input.IdUser, string(realtimeevent.EventApplicationCancelled), map[string]interface{}{
 		"id":          input.ApplicationExternalId,
 		"jobTitle":    jobDetails.JobTitle,
 		"companyName": jobDetails.CompanyName,
 		"reason":      reason,
-	}).Get(newCtx, nil)
+	}).Get(newCtx, nil); err != nil {
+		workflow.GetLogger(ctx).Error("Failed to publish application cancellation", "error", err)
+	}
 }
 
-func handleApplicationError(ctx workflow.Context, input JobApplicationWorkflowInput, jobDetails JobDetails, failureReason string) {
+func closeApplicationBrowser(ctx workflow.Context, workflowID string) error {
+	cleanupCtx, _ := workflow.NewDisconnectedContext(ctx)
+	cleanupCtx = workflow.WithActivityOptions(cleanupCtx, workflow.ActivityOptions{
+		StartToCloseTimeout: 30 * time.Second,
+		RetryPolicy: &temporal.RetryPolicy{
+			MaximumAttempts: 10,
+			MaximumInterval: 30 * time.Second,
+		},
+	})
+	return workflow.ExecuteActivity(cleanupCtx, "ClosePage", browser.ClosePageInput{
+		WorkflowID: workflowID,
+	}).Get(cleanupCtx, nil)
+}
+
+func handleApplicationError(ctx workflow.Context, input jobApplicationRuntimeInput, jobDetails JobDetails, failureReason string) {
 	newCtx, _ := workflow.NewDisconnectedContext(ctx)
 	cleanupOpts := workflow.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
@@ -448,7 +563,7 @@ func handleApplicationError(ctx workflow.Context, input JobApplicationWorkflowIn
 	}).Get(newCtx, nil)
 }
 
-func handleApplicationHalted(ctx workflow.Context, input JobApplicationWorkflowInput, jobDetails JobDetails, haltReason string) {
+func handleApplicationHalted(ctx workflow.Context, input jobApplicationRuntimeInput, jobDetails JobDetails, haltReason string) {
 	newCtx, _ := workflow.NewDisconnectedContext(ctx)
 	cleanupOpts := workflow.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
@@ -469,7 +584,24 @@ func handleApplicationHalted(ctx workflow.Context, input JobApplicationWorkflowI
 	}).Get(newCtx, nil)
 }
 
-func handleApplicationSuccess(ctx workflow.Context, input JobApplicationWorkflowInput, jobDetails JobDetails) {
+func markApplicationProcessing(ctx workflow.Context, input jobApplicationRuntimeInput, jobDetails JobDetails) {
+	logger := workflow.GetLogger(ctx)
+	if err := updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusProcessing, nil); err != nil {
+		logger.Error("Failed to set application status to processing", "error", err)
+		return
+	}
+	if err := workflow.ExecuteActivity(ctx, "PublishRedisEvent", input.IdUser, string(realtimeevent.EventApplicationDetailsUpdated), map[string]interface{}{
+		"id":          input.ApplicationExternalId,
+		"jobTitle":    jobDetails.JobTitle,
+		"companyName": jobDetails.CompanyName,
+		"status":      string(sqldb.JobApplicationStatusProcessing),
+		"updatedAt":   workflow.Now(ctx).UTC().Format(time.RFC3339),
+	}).Get(ctx, nil); err != nil {
+		logger.Error("Failed to publish processing status", "error", err)
+	}
+}
+
+func handleApplicationSuccess(ctx workflow.Context, input jobApplicationRuntimeInput, jobDetails JobDetails) {
 	updateJobApplicationStatus(ctx, input.IdJobApplication, sqldb.JobApplicationStatusApplied, nil)
 	workflow.ExecuteActivity(ctx, "PublishRedisEvent", input.IdUser, string(realtimeevent.EventApplicationSuccessful), map[string]interface{}{
 		"id":          input.ApplicationExternalId,
@@ -478,11 +610,22 @@ func handleApplicationSuccess(ctx workflow.Context, input JobApplicationWorkflow
 	}).Get(ctx, nil)
 }
 
-func openWebpage(ctx workflow.Context, workflowID string, url string) error {
-	return workflow.ExecuteActivity(ctx, "OpenWebpage", browser.OpenWebpageInput{
+func openWebpage(ctx workflow.Context, workflowID string, url string) (string, error) {
+	var result browser.OpenWebpageOutput
+	err := workflow.ExecuteActivity(ctx, "OpenWebpage", browser.OpenWebpageInput{
 		Url:        url,
 		WorkflowID: workflowID,
-	}).Get(ctx, nil)
+	}).Get(ctx, &result)
+	return result.Provider, err
+}
+
+func openWebpageWithReplayStatus(ctx workflow.Context, workflowID string, url string) (string, bool, error) {
+	var result browser.OpenWebpageOutput
+	err := workflow.ExecuteActivity(ctx, "OpenWebpage", browser.OpenWebpageInput{
+		Url:        url,
+		WorkflowID: workflowID,
+	}).Get(ctx, &result)
+	return result.Provider, result.ReplayRequired, err
 }
 
 func updateJobApplicationStatus(ctx workflow.Context, idJobApplication uint, status sqldb.JobApplicationStatus, reason *string) error {
@@ -521,7 +664,7 @@ func saveApplicationData(ctx workflow.Context, idUser, idJobApplication uint, qu
 	}).Get(ctx, nil)
 }
 
-func upsertCoverLetter(ctx workflow.Context, input JobApplicationWorkflowInput, jobDetails JobDetails, body string) error {
+func upsertCoverLetter(ctx workflow.Context, input jobApplicationRuntimeInput, jobDetails JobDetails, body string) error {
 	return workflow.ExecuteActivity(ctx, "UpsertCoverLetter", sqldb.UpsertCoverLetterInput{
 		IdUser:           input.IdUser,
 		IdJobApplication: input.IdJobApplication,
@@ -552,72 +695,4 @@ func fetchUserResume(ctx workflow.Context, idResume uint) (sqldb.Resume, error) 
 		return sqldb.Resume{}, err
 	}
 	return resume, nil
-}
-
-type UserProfile struct {
-	FirstName                   string                      `json:"first_name"`
-	LastName                    string                      `json:"last_name"`
-	Email                       string                      `json:"email"`
-	Phone                       string                      `json:"phone"`
-	Address                     string                      `json:"address"`
-	City                        string                      `json:"city"`
-	State                       string                      `json:"state"`
-	Zip                         string                      `json:"zip"`
-	CountryOfResidence          string                      `json:"country_of_residence"`
-	IsVeteran                   bool                        `json:"is_veteran"`
-	CountriesOfCitizenship      []string                    `json:"countries_of_citizenship"`
-	Gender                      string                      `json:"gender"`
-	DateOfBirth                 string                      `json:"date_of_birth"`
-	Age                         int                         `json:"age"`
-	SalaryMin                   *float64                    `json:"salary_min,omitempty"`
-	SalaryMax                   *float64                    `json:"salary_max,omitempty"`
-	SalaryCurrency              string                      `json:"salary_currency,omitempty"`
-	Ethnicity                   string                      `json:"ethnicity,omitempty"`
-	IsOpenToRelocating          *bool                       `json:"is_open_to_relocating,omitempty"`
-	NoticePeriodDays            *int                        `json:"notice_period_days,omitempty"`
-	LinkedInUrl                 *string                     `json:"linkedin_url,omitempty"`
-	PreferredWorkingArrangement []string                    `json:"preferred_working_arrangement,omitempty"`
-	LanguageProficiencies       []sqldb.LanguageProficiency `json:"language_proficiencies,omitempty"`
-	PortfolioLink               *string                     `json:"portfolio_link,omitempty"`
-}
-
-func fetchJobApplicationProfile(ctx workflow.Context, idUser uint) (UserProfile, error) {
-	var jobApplicationProfile sqldb.JobApplicationProfile
-	if err := workflow.ExecuteActivity(ctx, "FetchJobApplicationProfile", idUser).Get(ctx, &jobApplicationProfile); err != nil {
-		return UserProfile{}, err
-	}
-
-	now := workflow.Now(ctx)
-	age := now.Year() - jobApplicationProfile.DateOfBirth.Year()
-	if now.Month() < jobApplicationProfile.DateOfBirth.Month() ||
-		(now.Month() == jobApplicationProfile.DateOfBirth.Month() && now.Day() < jobApplicationProfile.DateOfBirth.Day()) {
-		age--
-	}
-
-	return UserProfile{
-		FirstName:                   jobApplicationProfile.FirstName,
-		LastName:                    jobApplicationProfile.LastName,
-		Email:                       jobApplicationProfile.Email,
-		Phone:                       jobApplicationProfile.Phone,
-		Address:                     jobApplicationProfile.Address,
-		City:                        jobApplicationProfile.City,
-		State:                       jobApplicationProfile.State,
-		Zip:                         jobApplicationProfile.Zip,
-		CountryOfResidence:          jobApplicationProfile.CountryOfResidence,
-		IsVeteran:                   jobApplicationProfile.IsVeteran,
-		CountriesOfCitizenship:      jobApplicationProfile.CountriesOfCitizenship,
-		Gender:                      jobApplicationProfile.Gender,
-		DateOfBirth:                 jobApplicationProfile.DateOfBirth.Format("2006-01-02"),
-		Age:                         age,
-		SalaryMin:                   jobApplicationProfile.SalaryMin,
-		SalaryMax:                   jobApplicationProfile.SalaryMax,
-		SalaryCurrency:              jobApplicationProfile.SalaryCurrency,
-		Ethnicity:                   jobApplicationProfile.Ethnicity,
-		IsOpenToRelocating:          jobApplicationProfile.IsOpenToRelocating,
-		NoticePeriodDays:            jobApplicationProfile.NoticePeriodDays,
-		LinkedInUrl:                 jobApplicationProfile.LinkedInUrl,
-		PreferredWorkingArrangement: jobApplicationProfile.PreferredWorkingArrangement,
-		LanguageProficiencies:       jobApplicationProfile.LanguageProficiencies,
-		PortfolioLink:               jobApplicationProfile.PortfolioLink,
-	}, nil
 }
