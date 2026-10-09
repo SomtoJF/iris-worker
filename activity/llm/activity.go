@@ -76,6 +76,6 @@ func redactUserActionValues(content string, values []sqldb.UserActionResultItem)
 	return content
 }
 
-func (a *Activity) CallJev(ctx context.Context, req types.JevRequest) (types.JevResponse, error) {
-	return a.aipi.GetJevCompletion(ctx, req)
+func (a *Activity) CallDecisions(ctx context.Context, req types.JevRequest) (types.JevResponse, error) {
+	return a.aipi.GetDecisionsCompletion(ctx, req)
 }

@@ -184,7 +184,7 @@ func runQADedupTest(t *testing.T, questions []sqldb.JobApplicationQuestion, resp
 	env.RegisterActivityWithOptions(func(_ context.Context, req types.JevRequest) (types.JevResponse, error) {
 		received = req
 		return respond(req)
-	}, activity.RegisterOptions{Name: "CallJev"})
+	}, activity.RegisterOptions{Name: "CallDecisions"})
 
 	env.ExecuteWorkflow(func(ctx workflow.Context) (qaDedupWorkflowResult, error) {
 		ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{

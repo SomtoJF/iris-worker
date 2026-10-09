@@ -23,7 +23,7 @@ func runJevFlow(s *agentLoopState, iteration int, shot browser.TakeScreenshotOut
 
 	fillResult, fillErr := fillDeterministicFields(
 		s.sessionCtx, s.workflowID, s.input.IdUser, s.input.IdJobApplication,
-		classified, s.session.UserProfile, s.session.ResumePath,
+		classified, s.session.UserProfile, s.session.ResumePath, s.filled,
 	)
 	if fillErr != nil {
 		logger.Warn("Deterministic fill encountered an error, continuing with LLM", "error", fillErr)

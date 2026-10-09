@@ -245,7 +245,7 @@ func llmFilterSearchResults(ctx workflow.Context, results []web.SerperOrganicRes
 	}
 
 	var jevResp types.JevResponse
-	if err := workflow.ExecuteActivity(ctx, "CallJev", types.JevRequest{
+	if err := workflow.ExecuteActivity(ctx, "CallDecisions", types.JevRequest{
 		State: map[string]any{
 			"company_name":    state.CompanyName,
 			"job_description": state.JobDescription,

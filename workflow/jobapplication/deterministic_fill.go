@@ -2,9 +2,11 @@ package jobapplication
 
 import (
 	"math/rand"
+	"strings"
 	"time"
 
 	browseractivity "github.com/SomtoJF/iris-worker/activity/browser"
+	"github.com/SomtoJF/iris-worker/activity/sqldb"
 	jobapplicationprofile "github.com/SomtoJF/iris-worker/workflow/jobapplication/profile"
 	"go.temporal.io/sdk/workflow"
 )
@@ -27,6 +29,7 @@ func fillDeterministicFields(
 	classified *FieldClassificationResult,
 	userProfile jobapplicationprofile.UserProfile,
 	resumePath string,
+	filled *filledFieldTracker,
 ) (*DeterministicFillResult, error) {
 	logger := workflow.GetLogger(ctx)
 	result := &DeterministicFillResult{
@@ -39,6 +42,9 @@ func fillDeterministicFields(
 	}
 
 	formatter := NewFieldFormatter()
+	if filled == nil {
+		filled = newFilledFieldTracker()
+	}
 
 	for _, field := range classified.Fields {
 		switch field.Type {
@@ -46,6 +52,11 @@ func fillDeterministicFields(
 			if field.FileInputIndex == nil {
 				logger.Warn("Resume field has no detected file-input index", "label", field.Label)
 				result.FailedResumeFill = true
+				continue
+			}
+			resumeKey := fieldTargetKey(field.Target, field.Label)
+			if filled.has(resumeKey) {
+				logger.Debug("Resume already uploaded, skipping", "label", field.Label)
 				continue
 			}
 			fileInputIndex := *field.FileInputIndex
@@ -65,12 +76,19 @@ func fillDeterministicFields(
 				// Continue anyway; planner will handle this
 			} else {
 				result.ResumeFieldsFilled++
+				filled.mark(resumeKey)
 			}
 
 		case FieldTypeStructured:
 			// Structured fields are nice-to-have; failures don't stop the application
 			if field.ProfileFieldName == "" {
 				logger.Warn("Structured field without profile field mapping", "field_index", field.Index, "label", field.Label)
+				continue
+			}
+
+			// Buttons (e.g. a phone country-code picker) can't be typed into.
+			if field.Role == "button" || field.Role == "link" {
+				logger.Debug("Skipping non-typeable structured field", "field_index", field.Index, "role", field.Role)
 				continue
 			}
 
@@ -84,6 +102,15 @@ func fillDeterministicFields(
 			value := formatter.GetFormattedValue(field.ProfileFieldName, userProfile)
 			if value == "" {
 				logger.Warn("No value for structured field", "field_index", field.Index, "profile_field", field.ProfileFieldName)
+				continue
+			}
+
+			fieldKey := fieldTargetKey(field.Target, field.Label)
+			// Widgets such as autocomplete country inputs report an empty value after filling,
+			// so a prior fill is enough to skip regardless of the current value.
+			if filled.has(fieldKey) || strings.TrimSpace(field.CurrentValue) == strings.TrimSpace(value) {
+				logger.Debug("Structured field already filled, skipping", "field_index", field.Index, "label", field.Label)
+				filled.mark(fieldKey)
 				continue
 			}
 
@@ -103,6 +130,7 @@ func fillDeterministicFields(
 				// Continue with next field; LLM can retry if needed
 			} else {
 				result.StructuredFieldsFilled++
+				filled.mark(fieldKey)
 			}
 
 		case FieldTypeOpenEnded, FieldTypeIgnore:
@@ -198,4 +226,30 @@ func ActivityOptions(ctx workflow.Context) workflow.Context {
 	return workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
 	})
+}
+
+// filledFieldTracker remembers which fields the deterministic flow has already filled,
+// keyed by stable target attributes because tagged indices can shift between screenshots.
+type filledFieldTracker struct {
+	keys map[string]struct{}
+}
+
+func newFilledFieldTracker() *filledFieldTracker {
+	return &filledFieldTracker{keys: make(map[string]struct{})}
+}
+
+func (t *filledFieldTracker) has(key string) bool {
+	_, ok := t.keys[key]
+	return ok
+}
+
+func (t *filledFieldTracker) mark(key string) {
+	t.keys[key] = struct{}{}
+}
+
+func fieldTargetKey(target *sqldb.BrowserMutationTarget, label string) string {
+	if target == nil {
+		return "label:" + label
+	}
+	return strings.Join([]string{target.Role, target.Selector, target.Name, target.Label}, "|")
 }

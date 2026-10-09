@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"text/template"
@@ -411,10 +412,45 @@ func executeToolCall(ctx workflow.Context, workflowID string, userID uint, idJob
 			Error:    err,
 		}
 	}
+	if toolCall.Name == "write_cover_letter" {
+		if err := typeGeneratedCoverLetter(ctx, workflowID, toolCall.Arguments, resp, taggedNodes); err != nil {
+			return ToolCallResult{ToolCall: toolCall, Result: resp, Error: err}
+		}
+	}
 	return ToolCallResult{
 		ToolCall: toolCall,
 		Result:   resp,
 	}
+}
+
+// typeGeneratedCoverLetter types the letter returned by CoverLetterWorkflow into the
+// requested element; the child workflow only generates the text.
+func typeGeneratedCoverLetter(ctx workflow.Context, workflowID string, arguments, result map[string]interface{}, nodes []browseractivity.SerializableTaggedNode) error {
+	coverLetter, _ := result["cover_letter"].(string)
+	if strings.TrimSpace(coverLetter) == "" {
+		return fmt.Errorf("cover letter generation returned no text")
+	}
+	index, ok := toolArgumentInt(arguments["element_index"])
+	if !ok {
+		return fmt.Errorf("write_cover_letter requires a valid element_index")
+	}
+	var target *sqldb.BrowserMutationTarget
+	for _, node := range nodes {
+		if node.Index == index {
+			target = mutationTargetForNode(node)
+			break
+		}
+	}
+	if err := workflow.ExecuteActivity(ctx, "Type", browseractivity.TypeInput{
+		WorkflowID:   workflowID,
+		ElementIndex: index,
+		Text:         coverLetter,
+		Replace:      true,
+		Target:       target,
+	}).Get(ctx, nil); err != nil {
+		return fmt.Errorf("type cover letter: %w", err)
+	}
+	return nil
 }
 
 func attachMutationTargets(toolName string, arguments map[string]interface{}, nodes []browseractivity.SerializableTaggedNode, fileNodes []browseractivity.SerializableTaggedFileInputNode) {
@@ -619,13 +655,63 @@ func toolArgumentInt(value interface{}) (int, bool) {
 	}
 }
 
-func getPlannerResponseSchema() map[string]interface{} {
-	// Build list of tool names for enum
-	toolNames := make([]string, 0, len(toolRequestStructureMap))
-	for toolName := range toolRequestStructureMap {
-		toolNames = append(toolNames, toolName)
+// plannerToolCallVariants returns one strict schema per tool so that the
+// arguments object is fully specified, as strict structured outputs require.
+func plannerToolCallVariants() []map[string]interface{} {
+	names := make([]string, 0, len(toolRequestStructureMap))
+	for name := range toolRequestStructureMap {
+		if name == "submit_application" {
+			continue // submission is decided and executed by the workflow, not the planner
+		}
+		names = append(names, name)
 	}
+	sort.Strings(names)
 
+	variants := make([]map[string]interface{}, 0, len(names))
+	for _, name := range names {
+		variants = append(variants, map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"name":      map[string]interface{}{"type": "string", "enum": []string{name}},
+				"arguments": withNoAdditionalProperties(toolRequestStructureMap[name]),
+			},
+			"required":             []string{"name", "arguments"},
+			"additionalProperties": false,
+		})
+	}
+	return variants
+}
+
+// withNoAdditionalProperties deep-copies a schema, setting additionalProperties=false on every object.
+func withNoAdditionalProperties(schema map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(schema)+1)
+	for key, value := range schema {
+		switch typed := value.(type) {
+		case map[string]interface{}:
+			if key == "properties" {
+				props := make(map[string]interface{}, len(typed))
+				for propName, prop := range typed {
+					if propSchema, ok := prop.(map[string]interface{}); ok {
+						props[propName] = withNoAdditionalProperties(propSchema)
+					} else {
+						props[propName] = prop
+					}
+				}
+				out[key] = props
+			} else {
+				out[key] = withNoAdditionalProperties(typed)
+			}
+		default:
+			out[key] = value
+		}
+	}
+	if out["type"] == "object" {
+		out["additionalProperties"] = false
+	}
+	return out
+}
+
+func getPlannerResponseSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
@@ -661,22 +747,7 @@ func getPlannerResponseSchema() map[string]interface{} {
 				"description": "Categorized failure status when is_application_failed is true; null otherwise",
 			},
 			"tool_call": map[string]interface{}{
-				"anyOf": []map[string]interface{}{
-					{"type": "null"},
-					{
-						"type": "object",
-						"properties": map[string]interface{}{
-							"name": map[string]interface{}{
-								"type": "string",
-								"enum": toolNames,
-							},
-							"arguments": map[string]interface{}{
-								"type": "object",
-							},
-						},
-						"required": []string{"name", "arguments"},
-					},
-				},
+				"anyOf":       append([]map[string]interface{}{{"type": "null"}}, plannerToolCallVariants()...),
 				"description": "The next tool to execute, or null when is_application_complete is true",
 			},
 			"reasoning": map[string]interface{}{
@@ -698,11 +769,13 @@ func getPlannerResponseSchema() map[string]interface{} {
 							"description": "The value filled in the field",
 						},
 					},
-					"required": []string{"question", "answer"},
+					"required":             []string{"question", "answer"},
+					"additionalProperties": false,
 				},
 			},
 		},
-		"required": []string{"is_application_complete", "is_application_failed", "failure_reason", "failure_status", "reasoning", "tool_call", "questions_answered"},
+		"required":             []string{"is_application_complete", "is_application_failed", "failure_reason", "failure_status", "reasoning", "tool_call", "questions_answered"},
+		"additionalProperties": false,
 	}
 }
 
@@ -767,13 +840,13 @@ func deduplicateQA(ctx workflow.Context, idUser uint, idJobApplication uint, que
 	}
 
 	var jevResponse types.JevResponse
-	if err := workflow.ExecuteActivity(ctx, "CallJev", types.JevRequest{
+	if err := workflow.ExecuteActivity(ctx, "CallDecisions", types.JevRequest{
 		State:            state,
 		Questions:        jevQuestions,
 		IdUser:           idUser,
 		IdJobApplication: &idJobApplication,
 	}).Get(ctx, &jevResponse); err != nil {
-		return nil, fmt.Errorf("CallJev Q&A deduplication: %w", err)
+		return nil, fmt.Errorf("CallDecisions Q&A deduplication: %w", err)
 	}
 
 	decisions, err := validateQADedupDecisions(jevResponse.Answers, pairs, len(questions))

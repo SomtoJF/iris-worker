@@ -30,6 +30,8 @@ type ClassifiedField struct {
 	Target           *sqldb.BrowserMutationTarget
 	Label            string
 	Description      string
+	CurrentValue     string
+	Role             string
 	Type             FieldClassificationType
 	StructuredType   string // For structured fields: email, phone, country, first_name, last_name, linkedin
 	ProfileFieldName string // Maps to UserProfile field
@@ -127,7 +129,7 @@ func classifyFieldsWithJev(
 	}
 
 	var result types.JevResponse
-	if err := workflow.ExecuteActivity(jevCtx, "CallJev", types.JevRequest{
+	if err := workflow.ExecuteActivity(jevCtx, "CallDecisions", types.JevRequest{
 		State: map[string]string{
 			"form_state": stateText,
 		},
@@ -224,7 +226,11 @@ func parseClassificationResponse(
 			Target:      mutationTargetForNode(node),
 			Label:       node.Label,
 			Description: node.Description,
+			Role:        node.Role,
 			Type:        fieldType,
+		}
+		if node.Value != nil {
+			cf.CurrentValue = *node.Value
 		}
 
 		// If it's a structured field, determine the structured type

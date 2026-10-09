@@ -37,7 +37,7 @@ func TestLLMFilterSearchResultsUsesJevChoiceAndNoul(t *testing.T) {
 			results[3].Link:  {Type: "noul", Noul: floatPointer(0.99)},
 		}
 		return types.JevResponse{Answers: answers}, nil
-	}, activity.RegisterOptions{Name: "CallJev"})
+	}, activity.RegisterOptions{Name: "CallDecisions"})
 
 	env.ExecuteWorkflow(func(ctx workflow.Context) (filterResult, error) {
 		ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute})
@@ -85,7 +85,7 @@ func TestLLMFilterSearchResultsFailsClosedForMissingAnswer(t *testing.T) {
 		return types.JevResponse{Answers: map[string]types.JevAnswer{
 			"company_domain": {Type: "choice", Choice: "acme.com"},
 		}}, nil
-	}, activity.RegisterOptions{Name: "CallJev"})
+	}, activity.RegisterOptions{Name: "CallDecisions"})
 
 	env.ExecuteWorkflow(func(ctx workflow.Context) (filterResult, error) {
 		ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute})

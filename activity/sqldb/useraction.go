@@ -51,18 +51,8 @@ func (a *Activity) CreateDurableUserAction(ctx context.Context, input CreateDura
 	if err := a.db.WithContext(ctx).Where("application_browser_id = ?", browserID).First(&session).Error; err != nil {
 		return UserAction{}, fmt.Errorf("load browser session for user action: %w", err)
 	}
-	if session.Provider == BrowserProviderKernel {
-		store := NewBrowserStore(a.db)
-		cursor, found, err := store.LatestBrowserMutationCursor(ctx, browserID, session.ReplayGeneration)
-		if err != nil {
-			return UserAction{}, fmt.Errorf("load user-action mutation cursor: %w", err)
-		}
-		if found {
-			if err := store.SetPendingBrowserCheckpoint(ctx, browserID, cursor.CreatedAt, cursor.MutationID); err != nil {
-				return UserAction{}, fmt.Errorf("set pending user-action checkpoint: %w", err)
-			}
-		}
-	}
+	// The checkpoint is intentionally not advanced here: a Kernel profile does not
+	// preserve page state, so the resume must replay this generation's mutations.
 	record := UserAction{
 		WorkflowID:           input.WorkflowID,
 		ApplicationBrowserID: browserID,

@@ -360,6 +360,10 @@ func executeJobApplication(
 
 	// Ensure browser resources are released even if startup fails or the session is canceled.
 	defer func() {
+		if result.UserActionPaused {
+			// handleuseraction already closed the browser for the durable pause.
+			return
+		}
 		if err := closeApplicationBrowser(ctx, workflowID); err != nil {
 			workflow.GetLogger(ctx).Error("Failed to close application browser", "error", err)
 		}
@@ -396,6 +400,7 @@ func executeJobApplication(
 		result:          result,
 		toolHistory:     []ToolCallResult{},
 		qaMap:           make(map[string]string),
+		filled:          newFilledFieldTracker(),
 	}
 
 	const maxAgentIterations = 50
@@ -424,6 +429,11 @@ func runAgentIteration(s *agentLoopState, iteration int) error {
 	}
 	if step == nil {
 		step = runLLMFlow(shot)
+	}
+
+	handled, err := submitIfReady(s, step.Screenshot)
+	if err != nil || handled {
+		return err
 	}
 
 	return planAndAct(s, step)

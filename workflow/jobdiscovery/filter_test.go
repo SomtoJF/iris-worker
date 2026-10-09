@@ -25,7 +25,7 @@ func TestFilterJobHitsWithJev(t *testing.T) {
 			jobHitQuestionKey(0): {Type: "noul", Noul: floatPointer(0.9)},
 			jobHitQuestionKey(1): {Type: "noul", Noul: floatPointer(0.1)},
 		}}, nil
-	}, activity.RegisterOptions{Name: "CallJev"})
+	}, activity.RegisterOptions{Name: "CallDecisions"})
 
 	env.ExecuteWorkflow(func(ctx workflow.Context) ([]mergedSearchHit, error) {
 		ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute})
@@ -56,7 +56,7 @@ func TestFilterJobHitsWithJevFailsClosedOnInvalidAnswer(t *testing.T) {
 		return types.JevResponse{Answers: map[string]types.JevAnswer{
 			jobHitQuestionKey(0): {Type: "choice", Choice: "yes"},
 		}}, nil
-	}, activity.RegisterOptions{Name: "CallJev"})
+	}, activity.RegisterOptions{Name: "CallDecisions"})
 
 	env.ExecuteWorkflow(func(ctx workflow.Context) ([]mergedSearchHit, error) {
 		ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute})

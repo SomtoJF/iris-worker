@@ -34,8 +34,8 @@ func (c *AIPIClient) GetCompletion(ctx context.Context, req types.AIPIRequest) (
 	return resp, nil
 }
 
-func (c *AIPIClient) GetJevCompletion(ctx context.Context, req types.JevRequest) (types.JevResponse, error) {
-	response, err := c.openRouterClient.GetJevCompletion(ctx, req)
+func (c *AIPIClient) GetDecisionsCompletion(ctx context.Context, req types.JevRequest) (types.JevResponse, error) {
+	response, err := c.openRouterClient.GetDecisionsCompletion(ctx, req)
 	if err != nil {
 		return types.JevResponse{}, fmt.Errorf("JEV completion: %w", err)
 	}

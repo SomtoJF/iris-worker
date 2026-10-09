@@ -30,7 +30,7 @@ func filterJobHitsWithJev(ctx workflow.Context, hits []mergedSearchHit, idUser u
 	}
 
 	var response types.JevResponse
-	if err := workflow.ExecuteActivity(ctx, "CallJev", types.JevRequest{
+	if err := workflow.ExecuteActivity(ctx, "CallDecisions", types.JevRequest{
 		State: map[string]any{
 			"search_results": promptHits,
 		},

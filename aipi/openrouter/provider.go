@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	jevModel          = "typesafe/jev-1.13"
+	jevModel          = "perplexity/pplx-decider-v1.1-27b"
 	decisionsEndpoint = "https://openrouter.ai/api/alpha/decisions"
 )
 
@@ -94,14 +94,24 @@ func (p *OpenRouterProvider) GetCompletion(ctx context.Context, req types.AIPIRe
 	return mapResponse(resp), nil
 }
 
-func (p *OpenRouterProvider) GetJevCompletion(ctx context.Context, req types.JevRequest) (types.JevResponse, error) {
+func (p *OpenRouterProvider) GetDecisionsCompletion(ctx context.Context, req types.JevRequest) (types.JevResponse, error) {
+	var state any = req.State
+	if req.ScreenshotDataURL != "" {
+		state = map[string]any{
+			"page_state": req.State,
+			"screenshot": map[string]any{
+				"type":      "image_url",
+				"image_url": map[string]string{"url": req.ScreenshotDataURL},
+			},
+		}
+	}
 	requestBody := struct {
 		Model     string                       `json:"model"`
 		State     any                          `json:"state"`
 		Questions map[string]types.JevQuestion `json:"questions"`
 	}{
 		Model:     jevModel,
-		State:     req.State,
+		State:     state,
 		Questions: req.Questions,
 	}
 	body, err := json.Marshal(requestBody)
@@ -232,8 +242,9 @@ func getModelRates(model string) modelRates {
 		"x-ai/grok-4-fast":                             {inputRate: 0.20, outputRate: 0.50},
 		"google/gemma-4-31b-it:free":                   {inputRate: 0.00, outputRate: 0.00},
 		"google/gemma-4-31b-it":                        {inputRate: 0.12, outputRate: 0.35},
-		"typesafe/jev-1.13":                            {inputRate: 0.042, outputRate: 0.00},
 		"openai/gpt-6-luna-decisions":                  {inputRate: 0.10, outputRate: 0.00},
+		"typesafe/jev-1.13":                            {inputRate: 0.042, outputRate: 0.00},
+		"perplexity/pplx-decider-v1.1-27b":             {inputRate: 0.02, outputRate: 0.00},
 		"openai/gpt-5.6-luna":                          {inputRate: 0.20, outputRate: 1.20},
 		"qwen/qwen3.8-flash":                           {inputRate: 0.15, outputRate: 0.47},
 	}

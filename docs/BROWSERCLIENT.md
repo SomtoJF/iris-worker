@@ -345,7 +345,7 @@ The current `HandleUserActionWorkflow` and tool-call child workflow arrangement 
 
 ## Q&A deduplication with JEV
 
-`JobApplicationWorkflow` currently calls `deduplicateQA` before saving collected application questions. Replace its `CallLLM`-style free-form JSON cleanup with the structured `CallJev` activity pattern used by `workflow/initiateapplication/jev.go`.
+`JobApplicationWorkflow` currently calls `deduplicateQA` before saving collected application questions. Replace its `CallLLM`-style free-form JSON cleanup with the structured `CallDecisions` activity pattern used by `workflow/initiateapplication/jev.go`.
 
 Send the collected Q&A as JEV state and ask for conservative equivalence decisions over candidate pairs/groups. Merge only entries that clearly express the same underlying question; do not merge distinct intents or conflicting answers, and do not invent or rewrite answers. Validate the returned typed decisions before applying merges. If the JEV activity fails or returns malformed/incomplete decisions, keep the raw Q&A (matching the current workflow's fallback behavior) and log the deduplication failure.
 
@@ -442,7 +442,7 @@ The Temporal `BrowserPoolWorkflow` remains the concurrency control for applicati
 4. **`browser/kernel`:** Implement profile/Vault attachment, Managed Auth references, headful stealth creation, operation execution/changelog writes, profile checkpoint/delete, Live View URL persistence, and SDK tests.
 5. **`activity/browser`:** Replace direct go-rod/proto types with BrowserClient calls and mutation-changelog writes. Keep activity names/serialization; `ClosePage` calls `CloseBrowser`.
 6. **`common/dependencies.go`:** Keep `MakeDependencies()` argument-free and explicitly call `NewBrowserClient(ClientTypeRod, cfg)` for now.
-7. **`workflow/jobapplication` and `workflow/handleuseraction`:** Generate UUID in `workflow.SideEffect`, persist/retrieve it across requeue, save/close on user-action pause, finish workflow/release slot, and resume/replay after user response. Add replay-generation boundaries for explicit retries after terminal failure; use `CallJev` for conservative Q&A deduplication with raw-Q&A fallback. Add `workflow.GetVersion` gates/replay tests.
+7. **`workflow/jobapplication` and `workflow/handleuseraction`:** Generate UUID in `workflow.SideEffect`, persist/retrieve it across requeue, save/close on user-action pause, finish workflow/release slot, and resume/replay after user response. Add replay-generation boundaries for explicit retries after terminal failure; use `CallDecisions` for conservative Q&A deduplication with raw-Q&A fallback. Add `workflow.GetVersion` gates/replay tests.
 8. **Frontend/API:** Add authenticated endpoint for active Live View URL and frontend read-only iframe handling, origin validation, playback signals, and paused-session UX.
 9. **Validation/dependencies:** Add provider/session/log/activity/requeue tests, keep this design current, and vendor Kernel SDK when its dependency is added.
 

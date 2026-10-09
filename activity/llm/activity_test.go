@@ -28,7 +28,7 @@ func (c *captureAIPI) GetCompletion(_ context.Context, request types.AIPIRequest
 	return types.AIPIResponse{Content: content}, nil
 }
 
-func (*captureAIPI) GetJevCompletion(context.Context, types.JevRequest) (types.JevResponse, error) {
+func (*captureAIPI) GetDecisionsCompletion(context.Context, types.JevRequest) (types.JevResponse, error) {
 	return types.JevResponse{}, nil
 }
 

@@ -30,10 +30,12 @@ type AIPIResponse struct {
 }
 
 type JevRequest struct {
-	State            any                    `json:"state"`
-	Questions        map[string]JevQuestion `json:"questions"`
-	IdUser           uint                   `json:"id_user"`
-	IdJobApplication *uint                  `json:"id_job_application,omitempty"`
+	State     any                    `json:"state"`
+	Questions map[string]JevQuestion `json:"questions"`
+	// ScreenshotDataURL is an optional data URL or URL of the page screenshot sent to the multimodal decider.
+	ScreenshotDataURL string `json:"screenshot_data_url,omitempty"`
+	IdUser            uint   `json:"id_user"`
+	IdJobApplication  *uint  `json:"id_job_application,omitempty"`
 }
 
 type JevQuestion struct {
@@ -66,5 +68,5 @@ type JevUsage struct {
 
 type AIPI interface {
 	GetCompletion(ctx context.Context, req AIPIRequest) (AIPIResponse, error)
-	GetJevCompletion(ctx context.Context, req JevRequest) (JevResponse, error)
+	GetDecisionsCompletion(ctx context.Context, req JevRequest) (JevResponse, error)
 }

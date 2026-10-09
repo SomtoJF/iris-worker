@@ -124,6 +124,9 @@ func TestReplayBrowserMutationsRunsCatchUpAndFinalVerification(t *testing.T) {
 		sequence = append(sequence, "captcha")
 		return browseractivity.DetectCaptchaOutput{Type: browseractivity.CaptchaTypeNone}, nil
 	}, activity.RegisterOptions{Name: "DetectCaptcha"})
+	env.RegisterActivityWithOptions(func(_ context.Context, _ browseractivity.GetBase64ScreenshotInput) (string, error) {
+		return "data:image/jpeg;base64,AAAA", nil
+	}, activity.RegisterOptions{Name: "GetBase64Screenshot"})
 	env.RegisterActivityWithOptions(func(_ context.Context, request types.JevRequest) (types.JevResponse, error) {
 		sequence = append(sequence, "jev")
 		jevRequest = request
@@ -132,7 +135,7 @@ func TestReplayBrowserMutationsRunsCatchUpAndFinalVerification(t *testing.T) {
 			"no_error_messages":           {Type: "noul", Noul: floatPointer(0.95)},
 			"correct_page_loaded":         {Type: "noul", Noul: floatPointer(0.95)},
 		}}, nil
-	}, activity.RegisterOptions{Name: "CallJev"})
+	}, activity.RegisterOptions{Name: "CallDecisions"})
 	env.RegisterActivityWithOptions(func(_ context.Context, _ browseractivity.CompleteBrowserReplayInput) error {
 		sequence = append(sequence, "complete")
 		return nil

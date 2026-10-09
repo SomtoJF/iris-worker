@@ -21,7 +21,7 @@ func gateJobPostingWithJev(ctx workflow.Context, pageText string, userID, applic
 	})
 
 	var result types.JevResponse
-	if err := workflow.ExecuteActivity(jevCtx, "CallJev", types.JevRequest{
+	if err := workflow.ExecuteActivity(jevCtx, "CallDecisions", types.JevRequest{
 		State: map[string]string{
 			"webpage_text": pageText,
 		},

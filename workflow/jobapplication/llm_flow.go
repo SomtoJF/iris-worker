@@ -20,8 +20,10 @@ type agentLoopState struct {
 	result          *executeJobApplicationResult
 	toolHistory     []ToolCallResult
 	qaMap           map[string]string
+	filled          *filledFieldTracker
 	complete        bool
 	paused          bool
+	submitFailures  int
 }
 
 // loopStep is what the planner sees for one iteration.

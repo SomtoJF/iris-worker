@@ -67,8 +67,10 @@ func replayBrowserMutations(ctx workflow.Context, workflowID string, userID, app
 		}
 	}
 
-	if err := verifyReplayFinalState(ctx, workflowID, userID, applicationID, expectedURL, expectedFields); err != nil {
-		return err
+	if len(replay.Mutations) > 0 {
+		if err := verifyReplayFinalState(ctx, workflowID, userID, applicationID, expectedURL, expectedFields); err != nil {
+			return err
+		}
 	}
 	return completeBrowserReplay(ctx, workflowID)
 }
@@ -195,8 +197,13 @@ func verifyReplayFinalState(ctx workflow.Context, workflowID string, userID, app
 	if err != nil {
 		return fmt.Errorf("serialize expected replay fields: %w", err)
 	}
+	screenshotDataURL, err := getBase64Screenshot(ctx, screenshot.Path)
+	if err != nil {
+		return fmt.Errorf("load final replay screenshot: %w", err)
+	}
 	var response types.JevResponse
 	if err := callReplayJev(ctx, userID, applicationID, types.JevRequest{
+		ScreenshotDataURL: screenshotDataURL,
 		State: map[string]string{
 			"page_elements":        state,
 			"expected_form_fields": string(fieldsJSON),
@@ -223,9 +230,9 @@ func verifyReplayFinalState(ctx workflow.Context, workflowID string, userID, app
 			},
 			"correct_page_loaded": {
 				Type:         "noul",
-				Instructions: "Is the expected application page loaded, rather than an error, redirect, or login page?",
+				Instructions: "Judging from the attached screenshot and the state, is the page at expected_page_url loaded (a job posting or application form is fine), rather than an error, redirect to another site, or login page?",
 				Criteria: map[string]string{
-					"true":  "The expected application page is loaded and ready for the applicant.",
+					"true":  "The page matching expected_page_url is loaded normally, whether it is a job posting or an application form.",
 					"false": "An error, redirect, login page, or other unexpected page is loaded.",
 				},
 			},
@@ -340,7 +347,7 @@ func callReplayJev(ctx workflow.Context, userID, applicationID uint, request typ
 	}
 	request.IdUser = userID
 	request.IdJobApplication = &applicationID
-	return workflow.ExecuteActivity(workflow.WithActivityOptions(ctx, options), "CallJev", request)
+	return workflow.ExecuteActivity(workflow.WithActivityOptions(ctx, options), "CallDecisions", request)
 }
 
 func replayJevDecisionIsYes(answers map[string]types.JevAnswer, name string, threshold float64) (bool, error) {
