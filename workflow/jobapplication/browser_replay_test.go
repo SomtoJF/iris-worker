@@ -152,6 +152,18 @@ func TestReplayBrowserMutationsRunsCatchUpAndFinalVerification(t *testing.T) {
 	if jevRequest.IdUser != 7 || jevRequest.IdJobApplication == nil || *jevRequest.IdJobApplication != 9 {
 		t.Fatalf("JEV request identity = user %d, application %v", jevRequest.IdUser, jevRequest.IdJobApplication)
 	}
+	for _, name := range []string{"all_expected_fields_present", "no_error_messages", "correct_page_loaded"} {
+		criteria, ok := jevRequest.Questions[name].Criteria.(map[string]interface{})
+		if !ok {
+			t.Errorf("JEV question %q criteria = %#v, want true/false descriptions", name, jevRequest.Questions[name].Criteria)
+			continue
+		}
+		trueDescription, hasTrue := criteria["true"].(string)
+		falseDescription, hasFalse := criteria["false"].(string)
+		if !hasTrue || trueDescription == "" || !hasFalse || falseDescription == "" {
+			t.Errorf("JEV question %q criteria = %#v, want true/false descriptions", name, jevRequest.Questions[name].Criteria)
+		}
+	}
 }
 
 func intPointer(value int) *int           { return &value }

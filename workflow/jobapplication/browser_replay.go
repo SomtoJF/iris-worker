@@ -208,6 +208,10 @@ func verifyReplayFinalState(ctx workflow.Context, workflowID string, userID, app
 			"all_expected_fields_present": {
 				Type:         "noul",
 				Instructions: "Are all expected form fields present and interactive on the page?",
+				Criteria: map[string]string{
+					"true":  "Every expected form field is present and interactive.",
+					"false": "At least one expected form field is missing or not interactive.",
+				},
 			},
 			"no_error_messages": {
 				Type:         "noul",
@@ -220,6 +224,10 @@ func verifyReplayFinalState(ctx workflow.Context, workflowID string, userID, app
 			"correct_page_loaded": {
 				Type:         "noul",
 				Instructions: "Is the expected application page loaded, rather than an error, redirect, or login page?",
+				Criteria: map[string]string{
+					"true":  "The expected application page is loaded and ready for the applicant.",
+					"false": "An error, redirect, login page, or other unexpected page is loaded.",
+				},
 			},
 		},
 	}).Get(ctx, &response); err != nil {
@@ -263,6 +271,10 @@ func diagnoseReplayFailure(ctx workflow.Context, workflowID string, mutation bro
 			"page_usable": {
 				Type:         "noul",
 				Instructions: "Is the page still in a usable state despite the replay failure?",
+				Criteria: map[string]string{
+					"true":  "The page remains usable and the applicant can continue interacting with it.",
+					"false": "An error or blocking state prevents the applicant from continuing.",
+				},
 			},
 		},
 	}).Get(ctx, &response)
