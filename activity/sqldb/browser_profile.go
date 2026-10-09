@@ -150,6 +150,7 @@ func (s *BrowserStore) EnsureKernelProfileVault(ctx context.Context, application
 
 	var profile BrowserProfile
 	var vault BrowserVault
+	var userExternalID string
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var application JobApplication
 		if err := tx.Model(&JobApplication{}).
@@ -162,6 +163,15 @@ func (s *BrowserStore) EnsureKernelProfileVault(ctx context.Context, application
 		if application.UserId == 0 {
 			return fmt.Errorf("Kernel browser application user is required")
 		}
+
+		var user User
+		if err := tx.Select("id_external").Where("id_user = ?", application.UserId).First(&user).Error; err != nil {
+			return fmt.Errorf("load Kernel browser user external ID: %w", err)
+		}
+		if user.IdExternal == uuid.Nil {
+			return fmt.Errorf("Kernel browser user external ID is required")
+		}
+		userExternalID = user.IdExternal.String()
 
 		vault = BrowserVault{UserId: application.UserId, Provider: BrowserProviderKernel}
 		if err := tx.Clauses(clause.OnConflict{
@@ -195,10 +205,10 @@ func (s *BrowserStore) EnsureKernelProfileVault(ctx context.Context, application
 		return BrowserProfile{}, BrowserVault{}, err
 	}
 	if profile.ProviderProfileName == "" {
-		profile.ProviderProfileName = fmt.Sprintf("iris-user-%d-profile", profile.UserId)
+		profile.ProviderProfileName = fmt.Sprintf("iris-user-%s-profile", userExternalID)
 	}
 	if vault.ProviderVaultName == "" {
-		vault.ProviderVaultName = fmt.Sprintf("iris-user-%d-vault", vault.UserId)
+		vault.ProviderVaultName = fmt.Sprintf("iris-user-%s-vault", userExternalID)
 	}
 	return profile, vault, nil
 }
