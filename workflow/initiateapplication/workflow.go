@@ -32,7 +32,7 @@ type jobDetails struct {
 	IsValidJobPosting bool   `json:"is_valid_job_posting"`
 }
 
-func InitiateApplicationWorkflow(ctx workflow.Context, input InitiateApplicationWorkflowInput) (InitiateApplicationWorkflowResponse, error) {
+func InitiateApplicationWorkflow(ctx workflow.Context, input InitiateApplicationWorkflowInput) (resp InitiateApplicationWorkflowResponse, retErr error) {
 	logger := workflow.GetLogger(ctx)
 	logger.Info("InitiateApplicationWorkflow started", "id_job_application", input.IdJobApplication)
 
@@ -51,6 +51,23 @@ func InitiateApplicationWorkflow(ctx workflow.Context, input InitiateApplication
 		IdJobApplication: input.IdJobApplication,
 	}).Get(ctx, &application); err != nil {
 		return InitiateApplicationWorkflowResponse{}, fmt.Errorf("get job application: %w", err)
+	}
+
+	if input.ApplyAutonomously {
+		defer func() {
+			if retErr == nil {
+				return
+			}
+			cleanupCtx, cancel := workflow.NewDisconnectedContext(ctx)
+			defer cancel()
+			if err := updateJobApplication(cleanupCtx, application.IdJobApplication, map[string]interface{}{"status": sqldb.JobApplicationStatusFailed}); err != nil {
+				logger.Error("Failed to mark application failed", "error", err)
+				return
+			}
+			if err := publishApplicationFailed(cleanupCtx, application.UserId, application.IdExternal.String()); err != nil {
+				logger.Error("Failed to publish application failed event", "error", err)
+			}
+		}()
 	}
 
 	pageText, err := scrapeWebPageTextOnly(ctx, application.Url, application.UserId, application.IdJobApplication)
@@ -154,6 +171,14 @@ func publishApplicationQueued(ctx workflow.Context, userID uint, externalID, tit
 		"companyName": company,
 		"status":      string(sqldb.JobApplicationStatusQueued),
 		"updatedAt":   workflow.Now(ctx).UTC().Format(time.RFC3339),
+	})
+}
+
+func publishApplicationFailed(ctx workflow.Context, userID uint, externalID string) error {
+	return publishEvent(ctx, userID, realtimeevent.EventApplicationDetailsUpdated, map[string]interface{}{
+		"id":        externalID,
+		"status":    string(sqldb.JobApplicationStatusFailed),
+		"updatedAt": workflow.Now(ctx).UTC().Format(time.RFC3339),
 	})
 }
 
