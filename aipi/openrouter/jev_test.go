@@ -42,7 +42,7 @@ func TestGetDecisionsCompletionUsesDecisionsAPI(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"id":"decision-123",
-			"model":"perplexity/pplx-decider-v1.1-27b-20261006",
+			"model":"perplexity/pplx-decider-latest",
 			"provider":"TypeSafe",
 			"answers":{"relevant":{"type":"noul","noul":0.82}},
 			"usage":{"input_tokens":100,"output_tokens":5,"cost":0.0000042}
@@ -69,7 +69,7 @@ func TestGetDecisionsCompletionUsesDecisionsAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDecisionsCompletion() error = %v", err)
 	}
-	if response.Model != "perplexity/pplx-decider-v1.1-27b-20261006" {
+	if response.Model != "perplexity/pplx-decider-latest" {
 		t.Errorf("model = %q", response.Model)
 	}
 	if got := response.Answers["relevant"].Noul; got == nil || *got != 0.82 {

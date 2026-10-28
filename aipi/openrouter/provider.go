@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	jevModel          = "perplexity/pplx-decider-v1.1-27b"
+	jevModel          = "perplexity/pplx-decider-latest"
 	decisionsEndpoint = "https://openrouter.ai/api/alpha/decisions"
 )
 
@@ -279,7 +279,7 @@ func getModelRates(model string) modelRates {
 		"google/gemma-4-31b-it":                        {inputRate: 0.12, outputRate: 0.35},
 		"openai/gpt-6-luna-decisions":                  {inputRate: 0.10, outputRate: 0.00},
 		"typesafe/jev-1.13":                            {inputRate: 0.042, outputRate: 0.00},
-		"perplexity/pplx-decider-v1.1-27b":             {inputRate: 0.02, outputRate: 0.00},
+		"perplexity/pplx-decider-latest":               {inputRate: 0.02, outputRate: 0.00},
 		"openai/gpt-5.6-luna":                          {inputRate: 0.20, outputRate: 1.20},
 		"qwen/qwen3.8-flash":                           {inputRate: 0.15, outputRate: 0.47},
 	}
