@@ -32,6 +32,13 @@ func TestGetDecisionsCompletionUsesDecisionsAPI(t *testing.T) {
 		if _, ok := request["state"]; !ok {
 			t.Error("request missing state")
 		}
+		state, ok := request["state"].(map[string]any)
+		if !ok {
+			t.Fatalf("state = %T, want original state object", request["state"])
+		}
+		if state["page"] != "company overview" {
+			t.Errorf("state.page = %v, want company overview", state["page"])
+		}
 		if _, ok := request["questions"]; !ok {
 			t.Error("request missing questions")
 		}
@@ -78,6 +85,53 @@ func TestGetDecisionsCompletionUsesDecisionsAPI(t *testing.T) {
 	}
 	if response.Usage.Cost != 0.0000042 {
 		t.Errorf("cost = %v, want 0.0000042", response.Usage.Cost)
+	}
+}
+
+func TestGetDecisionsCompletionEncodesScreenshotAsTopLevelStateItem(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode request body: %v", err)
+			return
+		}
+
+		state, ok := request["state"].([]any)
+		if !ok {
+			t.Fatalf("state = %T, want array", request["state"])
+		}
+		if len(state) != 2 {
+			t.Fatalf("state length = %d, want 2", len(state))
+		}
+		pageState, ok := state[0].(map[string]any)
+		if !ok || pageState["page"] != "company overview" {
+			t.Errorf("state[0] = %v, want existing state", state[0])
+		}
+		image, ok := state[1].(map[string]any)
+		if !ok || image["type"] != "image_url" {
+			t.Errorf("state[1] = %v, want image_url item", state[1])
+		}
+		imageURL, ok := image["image_url"].(map[string]any)
+		if !ok || imageURL["url"] != "data:image/png;base64,abc123" {
+			t.Errorf("state[1].image_url = %v, want screenshot data URL", image["image_url"])
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"decider","answers":{}}`))
+	}))
+	defer server.Close()
+
+	provider := &OpenRouterProvider{
+		jevHTTPClient:     server.Client(),
+		decisionsEndpoint: server.URL,
+	}
+	_, err := provider.GetDecisionsCompletion(context.Background(), types.JevRequest{
+		Model:             "custom/decider-model",
+		State:             map[string]string{"page": "company overview"},
+		ScreenshotDataURL: "data:image/png;base64,abc123",
+	})
+	if err != nil {
+		t.Fatalf("GetDecisionsCompletion() error = %v", err)
 	}
 }
 

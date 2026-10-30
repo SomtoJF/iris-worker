@@ -116,23 +116,13 @@ func (p *OpenRouterProvider) GetDecisionsCompletion(ctx context.Context, req typ
 		return types.JevResponse{}, fmt.Errorf("JEV Decisions request missing model")
 	}
 
-	var state any = req.State
-	if req.ScreenshotDataURL != "" {
-		state = map[string]any{
-			"page_state": req.State,
-			"screenshot": map[string]any{
-				"type":      "image_url",
-				"image_url": map[string]string{"url": req.ScreenshotDataURL},
-			},
-		}
-	}
 	requestBody := struct {
 		Model     string                       `json:"model"`
 		State     any                          `json:"state"`
 		Questions map[string]types.JevQuestion `json:"questions"`
 	}{
 		Model:     req.Model,
-		State:     state,
+		State:     buildDecisionsState(req.State, req.ScreenshotDataURL),
 		Questions: req.Questions,
 	}
 	body, err := json.Marshal(requestBody)
@@ -173,6 +163,22 @@ func (p *OpenRouterProvider) GetDecisionsCompletion(ctx context.Context, req typ
 		return types.JevResponse{}, fmt.Errorf("JEV Decisions response missing answers")
 	}
 	return response, nil
+}
+
+func buildDecisionsState(state any, screenshotDataURL string) any {
+	if screenshotDataURL == "" {
+		return state
+	}
+
+	return []any{
+		state,
+		map[string]any{
+			"type": "image_url",
+			"image_url": map[string]string{
+				"url": screenshotDataURL,
+			},
+		},
+	}
 }
 
 // toolChoice maps the provider-agnostic value onto the OpenAI-compatible tool_choice parameter.
