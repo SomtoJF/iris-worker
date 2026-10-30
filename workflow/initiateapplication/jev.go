@@ -22,6 +22,7 @@ func gateJobPostingWithJev(ctx workflow.Context, pageText string, userID, applic
 
 	var result types.JevResponse
 	if err := workflow.ExecuteActivity(jevCtx, "CallDecisions", types.JevRequest{
+		Model: "~perplexity/pplx-decider-latest",
 		State: map[string]string{
 			"webpage_text": pageText,
 		},

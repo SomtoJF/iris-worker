@@ -26,8 +26,8 @@ func TestGetDecisionsCompletionUsesDecisionsAPI(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Errorf("decode request body: %v", err)
 		}
-		if request["model"] != jevModel {
-			t.Errorf("model = %v, want %q", request["model"], jevModel)
+		if request["model"] != "custom/decider-model" {
+			t.Errorf("model = %v, want %q", request["model"], "custom/decider-model")
 		}
 		if _, ok := request["state"]; !ok {
 			t.Error("request missing state")
@@ -42,7 +42,7 @@ func TestGetDecisionsCompletionUsesDecisionsAPI(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"id":"decision-123",
-			"model":"perplexity/pplx-decider-latest",
+			"model":"~perplexity/pplx-decider-latest",
 			"provider":"TypeSafe",
 			"answers":{"relevant":{"type":"noul","noul":0.82}},
 			"usage":{"input_tokens":100,"output_tokens":5,"cost":0.0000042}
@@ -56,6 +56,7 @@ func TestGetDecisionsCompletionUsesDecisionsAPI(t *testing.T) {
 		decisionsEndpoint: server.URL + "/api/alpha/decisions",
 	}
 	response, err := provider.GetDecisionsCompletion(context.Background(), types.JevRequest{
+		Model: "custom/decider-model",
 		State: map[string]string{"page": "company overview"},
 		Questions: map[string]types.JevQuestion{
 			"relevant": {
@@ -69,7 +70,7 @@ func TestGetDecisionsCompletionUsesDecisionsAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDecisionsCompletion() error = %v", err)
 	}
-	if response.Model != "perplexity/pplx-decider-latest" {
+	if response.Model != "~perplexity/pplx-decider-latest" {
 		t.Errorf("model = %q", response.Model)
 	}
 	if got := response.Answers["relevant"].Noul; got == nil || *got != 0.82 {
@@ -91,8 +92,30 @@ func TestGetDecisionsCompletionReturnsAPIError(t *testing.T) {
 		jevHTTPClient:     server.Client(),
 		decisionsEndpoint: server.URL + "/api/alpha/decisions",
 	}
-	_, err := provider.GetDecisionsCompletion(context.Background(), types.JevRequest{})
+	_, err := provider.GetDecisionsCompletion(context.Background(), types.JevRequest{Model: "custom/decider-model"})
 	if err == nil {
 		t.Fatal("GetDecisionsCompletion() expected an error")
 	}
 }
+
+func TestGetDecisionsCompletionRejectsEmptyModelBeforeHTTP(t *testing.T) {
+	called := false
+	provider := &OpenRouterProvider{
+		jevHTTPClient: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			called = true
+			return nil, nil
+		}),
+	}
+
+	_, err := provider.GetDecisionsCompletion(context.Background(), types.JevRequest{})
+	if err == nil || err.Error() != "JEV Decisions request missing model" {
+		t.Fatalf("GetDecisionsCompletion() error = %v, want missing model error", err)
+	}
+	if called {
+		t.Fatal("HTTP client called for empty model")
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) Do(req *http.Request) (*http.Response, error) { return f(req) }

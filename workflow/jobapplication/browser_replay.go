@@ -109,6 +109,7 @@ func verifyReplayTarget(ctx workflow.Context, screenshot browseractivity.TakeScr
 	}
 	var response types.JevResponse
 	if err := callReplayJev(ctx, userID, applicationID, types.JevRequest{
+		Model: "~perplexity/pplx-decider-latest",
 		State: map[string]string{
 			"current_page":    state,
 			"recorded_target": string(targetJSON),
@@ -203,6 +204,7 @@ func verifyReplayFinalState(ctx workflow.Context, workflowID string, userID, app
 	}
 	var response types.JevResponse
 	if err := callReplayJev(ctx, userID, applicationID, types.JevRequest{
+		Model:             "~perplexity/pplx-decider-latest",
 		ScreenshotDataURL: screenshotDataURL,
 		State: map[string]string{
 			"page_elements":        state,
@@ -270,6 +272,7 @@ func diagnoseReplayFailure(ctx workflow.Context, workflowID string, mutation bro
 	}
 	var response types.JevResponse
 	jevErr := callReplayJev(ctx, userID, applicationID, types.JevRequest{
+		Model: "~perplexity/pplx-decider-latest",
 		State: map[string]string{
 			"failed_operation": mutation.Operation,
 			"page_elements":    state,

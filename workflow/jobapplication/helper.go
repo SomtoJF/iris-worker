@@ -743,6 +743,7 @@ func deduplicateQA(ctx workflow.Context, idUser uint, idJobApplication uint, que
 
 	var jevResponse types.JevResponse
 	if err := workflow.ExecuteActivity(ctx, "CallDecisions", types.JevRequest{
+		Model:            "~perplexity/pplx-decider-latest",
 		State:            state,
 		Questions:        jevQuestions,
 		IdUser:           idUser,

@@ -15,7 +15,6 @@ import (
 )
 
 const (
-	jevModel          = "perplexity/pplx-decider-latest"
 	decisionsEndpoint = "https://openrouter.ai/api/alpha/decisions"
 )
 
@@ -113,6 +112,10 @@ func (p *OpenRouterProvider) GetCompletion(ctx context.Context, req types.AIPIRe
 }
 
 func (p *OpenRouterProvider) GetDecisionsCompletion(ctx context.Context, req types.JevRequest) (types.JevResponse, error) {
+	if req.Model == "" {
+		return types.JevResponse{}, fmt.Errorf("JEV Decisions request missing model")
+	}
+
 	var state any = req.State
 	if req.ScreenshotDataURL != "" {
 		state = map[string]any{
@@ -128,7 +131,7 @@ func (p *OpenRouterProvider) GetDecisionsCompletion(ctx context.Context, req typ
 		State     any                          `json:"state"`
 		Questions map[string]types.JevQuestion `json:"questions"`
 	}{
-		Model:     jevModel,
+		Model:     req.Model,
 		State:     state,
 		Questions: req.Questions,
 	}
@@ -279,7 +282,7 @@ func getModelRates(model string) modelRates {
 		"google/gemma-4-31b-it":                        {inputRate: 0.12, outputRate: 0.35},
 		"openai/gpt-6-luna-decisions":                  {inputRate: 0.10, outputRate: 0.00},
 		"typesafe/jev-1.13":                            {inputRate: 0.042, outputRate: 0.00},
-		"perplexity/pplx-decider-latest":               {inputRate: 0.02, outputRate: 0.00},
+		"~perplexity/pplx-decider-latest":              {inputRate: 0.02, outputRate: 0.00},
 		"openai/gpt-5.6-luna":                          {inputRate: 0.20, outputRate: 1.20},
 		"qwen/qwen3.8-flash":                           {inputRate: 0.15, outputRate: 0.47},
 	}

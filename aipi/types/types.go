@@ -51,6 +51,7 @@ type AIPIResponse struct {
 }
 
 type JevRequest struct {
+	Model     string                 `json:"model"`
 	State     any                    `json:"state"`
 	Questions map[string]JevQuestion `json:"questions"`
 	// ScreenshotDataURL is an optional data URL or URL of the page screenshot sent to the multimodal decider.

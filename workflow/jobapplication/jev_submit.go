@@ -80,6 +80,7 @@ func decideSubmit(s *agentLoopState, shot browser.TakeScreenshotOutput) (submitI
 	applicationID := s.input.IdJobApplication
 	var response types.JevResponse
 	err = workflow.ExecuteActivity(ctx, "CallDecisions", types.JevRequest{
+		Model:             "~perplexity/pplx-decider-latest",
 		ScreenshotDataURL: image,
 		State:             map[string]string{"form_state": serializeSubmitState(shot)},
 		Questions: map[string]types.JevQuestion{

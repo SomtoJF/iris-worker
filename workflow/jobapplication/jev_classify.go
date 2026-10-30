@@ -130,6 +130,7 @@ func classifyFieldsWithJev(
 
 	var result types.JevResponse
 	if err := workflow.ExecuteActivity(jevCtx, "CallDecisions", types.JevRequest{
+		Model: "~perplexity/pplx-decider-latest",
 		State: map[string]string{
 			"form_state": stateText,
 		},

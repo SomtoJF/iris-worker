@@ -31,6 +31,7 @@ func filterJobHitsWithJev(ctx workflow.Context, hits []mergedSearchHit, idUser u
 
 	var response types.JevResponse
 	if err := workflow.ExecuteActivity(ctx, "CallDecisions", types.JevRequest{
+		Model: "~perplexity/pplx-decider-latest",
 		State: map[string]any{
 			"search_results": promptHits,
 		},
