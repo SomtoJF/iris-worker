@@ -35,7 +35,7 @@
 - [x] Add functionality to generate cover letter straight from extension
 - [x] Store cover letter in it's own model
 - [x] Maybe throttle sync so users don't have to manually click sync before submitting
-- [x] Disable automated apply to every job that is not from greenhouse
+- [x] Enable automated apply for discovered jobs across supported job boards
 - [x] Figure out captcha solving
   - [x] Turnstile + reCAPTCHA v2/v3 detect + CapSolver solve (working)
   - [x] hCaptcha detect + inject + buildTask (HCaptchaTaskProxyless — exact lowercase "less") wired end-to-end
